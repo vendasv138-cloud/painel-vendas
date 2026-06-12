@@ -721,11 +721,32 @@ def tela_vendedor(nome):
     # --- Cargas do vendedor ---
     with aba_cargas:
         minhas_cargas = df_cargas[df_cargas["Vendedor"] == nome]
+
+        # Seção 1: cargas atribuídas com meta
         if minhas_cargas.empty:
             st.info("Você não tem cargas atribuídas no momento.")
         else:
-            st.caption("Acompanhe o progresso das suas cargas.")
+            st.caption("Progresso das suas cargas:")
             widget_cargas(minhas_cargas, df)
+
+        # Seção 2: cargas em que vendeu mas não está atribuído
+        nomes_minhas = set(minhas_cargas["Carga"].tolist())
+        vendas_meu = df[
+            (df["Vendedor"] == nome) &
+            (df["Resultado"] == "Venda fechada") &
+            (df["Carga"].astype(str).str.strip() != "")
+        ]
+        outras_nomes = sorted(set(vendas_meu["Carga"].unique()) - nomes_minhas)
+        if outras_nomes:
+            st.divider()
+            st.caption("Vendas em outras cargas (sem meta individual):")
+            for carga_nome in outras_nomes:
+                kg_meu = float(vendas_meu[vendas_meu["Carga"] == carga_nome]["Kg"].sum())
+                info = df_cargas[df_cargas["Carga"] == carga_nome]
+                data_ent = info["Data Entrega"].iloc[0] if not info.empty else "-"
+                st.markdown(f"**{carga_nome}** — {data_ent}")
+                st.caption(f"✅ {br(kg_meu)} kg vendido por você")
+                st.divider()
 
     # --- Ranking ---
     with aba_rank:
