@@ -228,10 +228,27 @@ def cadastrar_cliente(nome, vendedor):
 
 @st.cache_data(ttl=30)
 def carregar_registros():
-    sh    = abrir_planilha()
-    ws    = sh.worksheet(ABA_REGISTROS)
-    dados = ws.get_all_records()
-    df = pd.DataFrame(dados)
+    sh     = abrir_planilha()
+    ws     = sh.worksheet(ABA_REGISTROS)
+    # get_all_values evita GSpreadException por cabeçalhos duplicados/vazios
+    valores = ws.get_all_values()
+    if len(valores) <= 1:
+        colunas_extras = ["_data", "_mes", "_linha",
+                          "Dias em Aberto", "Tempo até Resposta (dias)"]
+        return pd.DataFrame(columns=CABECALHO_REGISTROS + colunas_extras)
+    # Usa os cabeçalhos reais da planilha, ignorando duplicatas silenciosamente
+    headers = valores[0]
+    seen: dict = {}
+    headers_uniq = []
+    for h in headers:
+        h = h.strip()
+        if h in seen:
+            seen[h] += 1
+            headers_uniq.append(f"{h}_{seen[h]}")
+        else:
+            seen[h] = 0
+            headers_uniq.append(h)
+    df = pd.DataFrame(valores[1:], columns=headers_uniq)
 
     colunas_extras = ["_data", "_mes", "_linha", "Dias em Aberto", "Tempo até Resposta (dias)"]
     if df.empty:
