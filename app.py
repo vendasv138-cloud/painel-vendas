@@ -159,12 +159,14 @@ def deletar_carga(linha_planilha):
     carregar_cargas.clear()
 
 
-def progresso_carga(carga_nome, df_registros):
-    """Kg de vendas fechadas vinculadas a esta carga."""
+def progresso_carga(carga_nome, df_registros, vendedor=None):
+    """Kg de vendas fechadas vinculadas a esta carga (e opcionalmente a um vendedor)."""
     mask = (
         (df_registros["Carga"] == carga_nome) &
         (df_registros["Resultado"] == "Venda fechada")
     )
+    if vendedor:
+        mask &= (df_registros["Vendedor"] == vendedor)
     return float(df_registros.loc[mask, "Kg"].sum())
 
 
@@ -390,7 +392,7 @@ def widget_cargas(df_cargas, df_registros, filtro_vendedor=None):
     for _, carga in df_cargas.iterrows():
         if filtro_vendedor and carga["Vendedor"] != filtro_vendedor:
             continue
-        realizado = progresso_carga(carga["Carga"], df_registros)
+        realizado = progresso_carga(carga["Carga"], df_registros, vendedor=carga["Vendedor"])
         meta      = float(carga["Meta (Kg)"]) or 1.0
         pct       = min(realizado / meta, 1.0)
         cor       = "🟢" if pct >= 1.0 else ("🟡" if pct >= 0.6 else "🔴")
@@ -696,7 +698,7 @@ def tela_gestor():
 
                 # Detalhamento por vendedor
                 for _, carga in grupo.iterrows():
-                    realizado = progresso_carga(carga["Carga"], df)
+                    realizado = progresso_carga(carga["Carga"], df, vendedor=carga["Vendedor"])
                     meta      = float(carga["Meta (Kg)"]) or 1.0
                     pct       = min(realizado / meta, 1.0)
                     cor       = "🟢" if pct >= 1.0 else ("🟡" if pct >= 0.6 else "🔴")
