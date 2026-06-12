@@ -863,6 +863,16 @@ def tela_gestor():
                                    "Valor (R$)", "Dias em Aberto"] if c in abertos.columns]
             st.dataframe(abertos[cols_a], hide_index=True, use_container_width=True)
 
+        if not perd.empty:
+            st.subheader(f"❌ Orçamentos perdidos ({len(perd)})")
+            cols_p = [c for c in ["Data", "Vendedor", "Cliente", "Contato do Cliente",
+                                   "Kg", "Valor (R$)", "Motivo da Perda",
+                                   "Data Resposta Orçamento"] if c in perd.columns]
+            perd_show = perd[cols_p].copy()
+            perd_show["Valor (R$)"] = perd_show["Valor (R$)"].map(lambda v: "R$ " + br(v))
+            perd_show["Kg"] = perd_show["Kg"].map(br)
+            st.dataframe(perd_show, hide_index=True, use_container_width=True)
+
     # --- Cargas ---
     with aba_cargas:
         st.subheader("Cadastrar nova carga")
