@@ -545,7 +545,7 @@ def tela_vendedor(nome):
 
     # --- Nova venda ---
     with aba_nova:
-        opcoes_carga = list(df_cargas["Carga"]) if not df_cargas.empty else []
+        opcoes_carga = list(df_cargas["Carga"].unique()) if not df_cargas.empty else []
         if opcoes_carga:
             carga_val = st.selectbox("🚛 Carga *", opcoes_carga, key=f"carga_{fv}")
         else:
