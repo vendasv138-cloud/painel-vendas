@@ -17,35 +17,35 @@ from google.oauth2.service_account import Credentials
 # ----------------------------------------------------------------------------
 TZ = ZoneInfo("America/Sao_Paulo")
 
-ABA_REGISTROS = "Registros"
+ABA_REGISTROS  = "Registros"
 ABA_VENDEDORES = "Vendedores"
-ABA_CLIENTES = "Clientes"
-ABA_DIARIA = "Análise Diária"
-ABA_MENSAL = "Análise Mensal"
+ABA_CLIENTES   = "Clientes"
+ABA_CARGAS     = "Cargas"
+ABA_DIARIA     = "Análise Diária"
+ABA_MENSAL     = "Análise Mensal"
 
 CABECALHO_REGISTROS = [
     "Data", "Hora", "Vendedor", "Cliente", "Tipo cliente", "Com quem falou",
-    "Resultado", "Situação", "Kg", "Valor (R$)", "R$/kg",
+    "Resultado", "Situação", "Kg", "Valor (R$)", "R$/kg", "Carga",
 ]
 
-SITUACAO_ABERTO = "Em aberto"
-SITUACAO_APROVADO = "Aprovado"
-SITUACAO_PERDIDO = "Perdido"
-
+CABECALHO_CARGAS   = ["Carga", "Data Entrega", "Vendedor", "Meta (Kg)"]
 CABECALHO_CLIENTES = ["Cliente", "Cadastrado em", "Cadastrado por"]
+
+SITUACAO_ABERTO   = "Em aberto"
+SITUACAO_APROVADO = "Aprovado"
+SITUACAO_PERDIDO  = "Perdido"
 
 RESULTADOS = ["Só contato", "Orçamento enviado", "Venda fechada"]
 
-# Vendedores criados automaticamente na primeira execução.
-# Depois, gerencie direto na aba "Vendedores" da planilha (nome, PIN, ativo).
 VENDEDORES_INICIAIS = [
     ["ANA PAULA", "1010", "SIM"],
-    ["CAIO", "2020", "SIM"],
+    ["CAIO",      "2020", "SIM"],
     ["VANDERLEI", "3030", "SIM"],
-    ["JESUS", "4040", "SIM"],
-    ["JONATAN", "5050", "SIM"],
-    ["MARCIO", "6060", "SIM"],
-    ["RENATA", "7070", "SIM"],
+    ["JESUS",     "4040", "SIM"],
+    ["JONATAN",   "5050", "SIM"],
+    ["MARCIO",    "6060", "SIM"],
+    ["RENATA",    "7070", "SIM"],
 ]
 
 st.set_page_config(page_title="Painel de Vendas", page_icon="📊", layout="wide")
@@ -55,7 +55,6 @@ st.set_page_config(page_title="Painel de Vendas", page_icon="📊", layout="wide
 # Utilidades
 # ----------------------------------------------------------------------------
 def br(valor, casas=2):
-    """Formata número no padrão brasileiro: 1.234,56"""
     if valor is None or pd.isna(valor):
         return "-"
     s = f"{valor:,.{casas}f}"
@@ -85,13 +84,19 @@ def abrir_planilha():
 
 
 def garantir_estrutura(sh):
-    """Cria as abas necessárias na primeira execução."""
     titulos = [ws.title for ws in sh.worksheets()]
 
     if ABA_REGISTROS not in titulos:
-        ws = sh.add_worksheet(title=ABA_REGISTROS, rows=2000, cols=12)
+        ws = sh.add_worksheet(title=ABA_REGISTROS, rows=2000, cols=13)
         ws.update(values=[CABECALHO_REGISTROS], range_name="A1")
-        ws.format("A1:K1", {"textFormat": {"bold": True}})
+        ws.format("A1:L1", {"textFormat": {"bold": True}})
+    else:
+        # Garante coluna "Carga" em sheets já existentes
+        ws = sh.worksheet(ABA_REGISTROS)
+        cabecalho_atual = ws.row_values(1)
+        if "Carga" not in cabecalho_atual:
+            col = len(cabecalho_atual) + 1
+            ws.update_cell(1, col, "Carga")
 
     if ABA_CLIENTES not in titulos:
         ws = sh.add_worksheet(title=ABA_CLIENTES, rows=2000, cols=5)
@@ -106,6 +111,11 @@ def garantir_estrutura(sh):
         )
         ws.format("A1:C1", {"textFormat": {"bold": True}})
 
+    if ABA_CARGAS not in titulos:
+        ws = sh.add_worksheet(title=ABA_CARGAS, rows=200, cols=5)
+        ws.update(values=[CABECALHO_CARGAS], range_name="A1")
+        ws.format("A1:D1", {"textFormat": {"bold": True}})
+
     if ABA_DIARIA not in titulos:
         sh.add_worksheet(title=ABA_DIARIA, rows=100, cols=10)
 
@@ -113,13 +123,55 @@ def garantir_estrutura(sh):
         sh.add_worksheet(title=ABA_MENSAL, rows=500, cols=12)
 
 
+# ----------------------------------------------------------------------------
+# Cargas
+# ----------------------------------------------------------------------------
+@st.cache_data(ttl=60)
+def carregar_cargas():
+    sh = abrir_planilha()
+    dados = sh.worksheet(ABA_CARGAS).get_all_records(
+        expected_headers=CABECALHO_CARGAS
+    )
+    df = pd.DataFrame(dados) if dados else pd.DataFrame(columns=CABECALHO_CARGAS)
+    df["_linha"] = df.index + 2
+    df["Meta (Kg)"] = pd.to_numeric(df["Meta (Kg)"], errors="coerce").fillna(0.0)
+    return df
+
+
+def salvar_carga(nome, data_entrega, vendedor, meta_kg):
+    sh = abrir_planilha()
+    sh.worksheet(ABA_CARGAS).append_row(
+        [nome.strip(), data_entrega, vendedor, round(float(meta_kg), 2)],
+        value_input_option="RAW",
+    )
+    carregar_cargas.clear()
+
+
+def deletar_carga(linha_planilha):
+    sh = abrir_planilha()
+    sh.worksheet(ABA_CARGAS).delete_rows(int(linha_planilha))
+    carregar_cargas.clear()
+
+
+def progresso_carga(carga_nome, df_registros):
+    """Kg de vendas fechadas vinculadas a esta carga."""
+    mask = (
+        (df_registros["Carga"] == carga_nome) &
+        (df_registros["Resultado"] == "Venda fechada")
+    )
+    return float(df_registros.loc[mask, "Kg"].sum())
+
+
+# ----------------------------------------------------------------------------
+# Vendedores / Clientes / Registros
+# ----------------------------------------------------------------------------
 @st.cache_data(ttl=300)
 def carregar_vendedores():
     sh = abrir_planilha()
     dados = sh.worksheet(ABA_VENDEDORES).get_all_records()
     ativos = {}
     for linha in dados:
-        nome = str(linha.get("Nome", "")).strip()
+        nome  = str(linha.get("Nome", "")).strip()
         ativo = str(linha.get("Ativo", "")).strip().upper()
         if nome and ativo in ("SIM", "S", "1", "X"):
             ativos[nome] = str(linha.get("PIN", "")).strip()
@@ -128,15 +180,13 @@ def carregar_vendedores():
 
 @st.cache_data(ttl=60)
 def carregar_clientes():
-    """Lista de clientes cadastrados (aba Clientes da planilha)."""
     sh = abrir_planilha()
     dados = sh.worksheet(ABA_CLIENTES).get_all_records(
         expected_headers=CABECALHO_CLIENTES
     )
-    nomes = []
-    vistos = set()
+    nomes, vistos = [], set()
     for linha in dados:
-        nome = str(linha.get("Cliente", "")).strip()
+        nome  = str(linha.get("Cliente", "")).strip()
         chave = nome.upper()
         if nome and chave not in vistos:
             vistos.add(chave)
@@ -156,15 +206,19 @@ def cadastrar_cliente(nome, vendedor):
 @st.cache_data(ttl=30)
 def carregar_registros():
     sh = abrir_planilha()
-    dados = sh.worksheet(ABA_REGISTROS).get_all_records(
-        expected_headers=CABECALHO_REGISTROS
-    )
+    dados = sh.worksheet(ABA_REGISTROS).get_all_records()
     df = pd.DataFrame(dados)
     if df.empty:
         return pd.DataFrame(columns=CABECALHO_REGISTROS + ["_data", "_mes", "_linha"])
     df["_linha"] = df.index + 2
 
+    # Garante coluna Carga mesmo em sheets antigas
+    if "Carga" not in df.columns:
+        df["Carga"] = ""
+
     for col in ("Kg", "Valor (R$)", "R$/kg"):
+        if col not in df.columns:
+            df[col] = 0.0
         if df[col].dtype == object:
             df[col] = (
                 df[col].astype(str)
@@ -174,11 +228,12 @@ def carregar_registros():
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
 
     df["_data"] = pd.to_datetime(df["Data"], format="%d/%m/%Y", errors="coerce")
-    df["_mes"] = df["_data"].dt.strftime("%m/%Y")
+    df["_mes"]  = df["_data"].dt.strftime("%m/%Y")
     return df
 
 
-def salvar_registro(vendedor, cliente, cliente_novo, contato, resultado, kg, valor):
+def salvar_registro(vendedor, cliente, cliente_novo, contato,
+                    resultado, kg, valor, carga=""):
     sh = abrir_planilha()
     ws = sh.worksheet(ABA_REGISTROS)
     ts = agora()
@@ -199,6 +254,7 @@ def salvar_registro(vendedor, cliente, cliente_novo, contato, resultado, kg, val
             round(float(kg or 0), 2),
             round(float(valor or 0), 2),
             preco_kg,
+            carga or "",
         ],
         value_input_option="RAW",
     )
@@ -206,7 +262,7 @@ def salvar_registro(vendedor, cliente, cliente_novo, contato, resultado, kg, val
     try:
         atualizar_abas_analise()
     except Exception:
-        pass  # análise na planilha é secundária; não trava o lançamento
+        pass
 
 
 def mudar_situacao(linha_planilha, nova):
@@ -217,11 +273,11 @@ def mudar_situacao(linha_planilha, nova):
 
 
 def aprovar_orcamento(reg):
-    """Marca o orçamento como aprovado e registra a venda automaticamente."""
     mudar_situacao(reg["_linha"], SITUACAO_APROVADO)
     salvar_registro(reg["Vendedor"], reg["Cliente"], False,
                     str(reg["Com quem falou"]), "Venda fechada",
-                    float(reg["Kg"]), float(reg["Valor (R$)"]))
+                    float(reg["Kg"]), float(reg["Valor (R$)"]),
+                    str(reg.get("Carga", "")))
 
 
 def perder_orcamento(reg):
@@ -243,7 +299,7 @@ def deletar_registro(linha_planilha):
 
 
 # ----------------------------------------------------------------------------
-# Resumos (usados no app e gravados na planilha)
+# Resumos
 # ----------------------------------------------------------------------------
 COLUNAS_RESUMO = ["Vendedor", "Lançamentos", "Clientes novos", "Orçamentos",
                   "Vendas", "Kg vendido", "R$ vendido", "R$/kg médio",
@@ -251,17 +307,16 @@ COLUNAS_RESUMO = ["Vendedor", "Lançamentos", "Clientes novos", "Orçamentos",
 
 
 def resumir(df):
-    """Resumo por vendedor: lançamentos, orçamentos, vendas, kg, R$, conversão."""
     if df.empty:
         return pd.DataFrame(columns=COLUNAS_RESUMO)
     linhas = []
     for vend, g in df.groupby("Vendedor"):
         vendas = g[g["Resultado"] == "Venda fechada"]
-        orcs = g[g["Resultado"] == "Orçamento enviado"]
-        novos = g[g["Tipo cliente"] == "Novo"]
-        kg = vendas["Kg"].sum()
-        rs = vendas["Valor (R$)"].sum()
-        conv = 100 * len(vendas) / len(g) if len(g) else 0
+        orcs   = g[g["Resultado"] == "Orçamento enviado"]
+        novos  = g[g["Tipo cliente"] == "Novo"]
+        kg     = vendas["Kg"].sum()
+        rs     = vendas["Valor (R$)"].sum()
+        conv   = 100 * len(vendas) / len(g) if len(g) else 0
         linhas.append([
             vend, len(g), len(novos), len(orcs), len(vendas),
             round(kg, 2), round(rs, 2),
@@ -273,24 +328,21 @@ def resumir(df):
 
 
 def atualizar_abas_analise():
-    """Reescreve as abas de análise diária e mensal na planilha."""
-    sh = abrir_planilha()
-    df = carregar_registros()
+    sh   = abrir_planilha()
+    df   = carregar_registros()
     hoje = agora().strftime("%d/%m/%Y")
 
-    # --- Diária ---
-    df_hoje = df[df["Data"] == hoje]
-    res_dia = resumir(df_hoje)
-    sem_lancamento = sorted(set(carregar_vendedores()) - set(res_dia["Vendedor"]))
+    df_hoje  = df[df["Data"] == hoje]
+    res_dia  = resumir(df_hoje)
+    sem_lanc = sorted(set(carregar_vendedores()) - set(res_dia["Vendedor"]))
     ws = sh.worksheet(ABA_DIARIA)
     ws.clear()
-    valores = [[f"ANÁLISE DO DIA {hoje}"], [], COLUNAS_RESUMO]
+    valores  = [[f"ANÁLISE DO DIA {hoje}"], [], COLUNAS_RESUMO]
     valores += res_dia.astype(object).values.tolist()
-    valores += [[], ["Sem lançamentos hoje:", ", ".join(sem_lancamento) or "ninguém"]]
+    valores += [[], ["Sem lançamentos hoje:", ", ".join(sem_lanc) or "ninguém"]]
     ws.update(values=valores, range_name="A1")
     ws.format("A3:I3", {"textFormat": {"bold": True}})
 
-    # --- Mensal ---
     ws = sh.worksheet(ABA_MENSAL)
     ws.clear()
     valores = [["ANÁLISE MENSAL (todos os meses)"], [], ["Mês"] + COLUNAS_RESUMO]
@@ -311,13 +363,33 @@ def tabela_ranking(res, destaque=None):
         return
     res = res.copy()
     res.insert(0, "Posição", [f"{i}º" for i in range(1, len(res) + 1)])
-    res["Kg vendido"] = res["Kg vendido"].map(lambda v: br(v))
-    res["R$ vendido"] = res["R$ vendido"].map(lambda v: "R$ " + br(v))
+    res["Kg vendido"]  = res["Kg vendido"].map(lambda v: br(v))
+    res["R$ vendido"]  = res["R$ vendido"].map(lambda v: "R$ " + br(v))
     res["R$/kg médio"] = res["R$/kg médio"].map(lambda v: "R$ " + br(v))
     st.dataframe(res, hide_index=True, use_container_width=True)
     if destaque is not None and destaque in res["Vendedor"].values:
         pos = res.loc[res["Vendedor"] == destaque, "Posição"].iloc[0]
         st.caption(f"Sua posição: {pos} de {len(res)}")
+
+
+def widget_cargas(df_cargas, df_registros, filtro_vendedor=None):
+    """Exibe cada carga com barra de progresso."""
+    if df_cargas.empty:
+        st.info("Nenhuma carga cadastrada ainda.")
+        return
+    for _, carga in df_cargas.iterrows():
+        if filtro_vendedor and carga["Vendedor"] != filtro_vendedor:
+            continue
+        realizado = progresso_carga(carga["Carga"], df_registros)
+        meta      = float(carga["Meta (Kg)"]) or 1.0
+        pct       = min(realizado / meta, 1.0)
+        cor       = "🟢" if pct >= 1.0 else ("🟡" if pct >= 0.6 else "🔴")
+        st.markdown(
+            f"**{carga['Carga']}** — {carga['Data Entrega']} — "
+            f"{carga['Vendedor']} — Meta: {br(meta)} kg"
+        )
+        st.progress(pct, text=f"{cor} {br(realizado)} / {br(meta)} kg  ({pct*100:.0f}%)")
+        st.divider()
 
 
 def tela_login():
@@ -327,7 +399,7 @@ def tela_login():
 
     col, _ = st.columns([1, 1])
     with col:
-        nome = st.selectbox("Quem é você?", nomes)
+        nome  = st.selectbox("Quem é você?", nomes)
         senha = st.text_input(
             "Senha" if nome == "GESTOR" else "PIN",
             type="password", max_chars=20,
@@ -349,26 +421,47 @@ def tela_vendedor(nome):
     st.title(f"Olá, {nome.title()}!")
     if "flash" in st.session_state:
         st.success(st.session_state.pop("flash"))
-    aba_novo, aba_orc, aba_hoje, aba_rank = st.tabs(
-        ["➕ Novo lançamento", "📄 Orçamentos em aberto",
-         "📋 Meus lançamentos de hoje", "🏆 Ranking"]
+
+    aba_nova, aba_orc, aba_hoje, aba_cargas, aba_rank = st.tabs(
+        ["➕ Nova venda", "📄 Orçamentos em aberto",
+         "📋 Meus lançamentos de hoje", "🚛 Cargas", "🏆 Ranking"]
     )
 
-    # --- Novo lançamento ---
-    with aba_novo:
+    df         = carregar_registros()
+    df_cargas  = carregar_cargas()
+    hoje       = agora().strftime("%d/%m/%Y")
+    mes        = agora().strftime("%m/%Y")
+
+    # Chave de versão para limpar o formulário após salvar
+    fv = st.session_state.get("form_ver", 0)
+
+    # --- Nova venda ---
+    with aba_nova:
+        # Selectbox de carga (acima do cliente)
+        opcoes_carga = ["— Nenhuma carga —"] + list(df_cargas["Carga"])
+        carga_sel = st.selectbox(
+            "🚛 Vincular a uma carga (opcional)",
+            opcoes_carga,
+            key=f"carga_{fv}",
+        )
+        carga_val = "" if carga_sel == "— Nenhuma carga —" else carga_sel
+
         c1, c2 = st.columns(2)
-        cliente = c1.text_input("Cliente *")
-        tipo = c1.radio("Tipo de cliente *", ["Carteira", "Novo"], horizontal=True)
+        cliente     = c1.text_input("Cliente *", key=f"cli_{fv}")
+        tipo        = c1.radio("Tipo de cliente *", ["Carteira", "Novo"],
+                               horizontal=True, key=f"tipo_{fv}")
         cliente_novo = tipo == "Novo"
-        contato = c2.text_input("Com quem falou")
-        resultado = st.radio("Resultado do contato *", RESULTADOS, horizontal=True)
+        contato     = c2.text_input("Com quem falou", key=f"cont_{fv}")
+        resultado   = st.radio("Resultado do contato *", RESULTADOS,
+                               horizontal=True, key=f"res_{fv}")
 
         kg = valor = 0.0
         if resultado != "Só contato":
             c1, c2, c3 = st.columns(3)
-            kg = c1.number_input("Kg *", min_value=0.0, step=10.0, format="%.2f")
+            kg    = c1.number_input("Kg *", min_value=0.0, step=10.0,
+                                    format="%.2f", key=f"kg_{fv}")
             valor = c2.number_input("Valor total (R$) *", min_value=0.0,
-                                    step=100.0, format="%.2f")
+                                    step=100.0, format="%.2f", key=f"val_{fv}")
             preco = valor / kg if kg else 0
             c3.metric("R$/kg (automático)", "R$ " + br(preco))
 
@@ -379,16 +472,14 @@ def tela_vendedor(nome):
                 st.error("Para orçamento ou venda, informe Kg e Valor.")
             else:
                 salvar_registro(nome, cliente, cliente_novo, contato,
-                                resultado, kg, valor)
+                                resultado, kg, valor, carga_val)
                 msg = "Lançamento registrado!"
                 if cliente_novo:
                     msg += f" Cliente novo '{cliente.strip()}' cadastrado."
-                st.success(msg + " Data e hora gravadas automaticamente.")
+                st.session_state["flash"] = msg + " Data e hora gravadas automaticamente."
+                st.session_state["form_ver"] = fv + 1
                 st.balloons()
-
-    df = carregar_registros()
-    hoje = agora().strftime("%d/%m/%Y")
-    mes = agora().strftime("%m/%Y")
+                st.rerun()
 
     # --- Orçamentos em aberto ---
     with aba_orc:
@@ -425,11 +516,12 @@ def tela_vendedor(nome):
         else:
             for _, reg in meus.iterrows():
                 c1, c2 = st.columns([5, 1])
+                carga_info = f" | 🚛 {reg['Carga']}" if str(reg.get("Carga", "")).strip() else ""
                 c1.write(
                     f"**{reg['Hora']}** — {reg['Cliente']} — {reg['Resultado']} — "
-                    f"{br(reg['Kg'])} kg — R$ {br(reg['Valor (R$)'])}"
+                    f"{br(reg['Kg'])} kg — R$ {br(reg['Valor (R$)'])}{carga_info}"
                 )
-                chave = f"del_{reg['_linha']}"
+                chave      = f"del_{reg['_linha']}"
                 chave_conf = f"conf_{reg['_linha']}"
                 if st.session_state.get(chave_conf):
                     cc1, cc2, cc3 = st.columns([3, 1, 1])
@@ -447,6 +539,15 @@ def tela_vendedor(nome):
                         st.session_state[chave_conf] = True
                         st.rerun()
 
+    # --- Cargas do vendedor ---
+    with aba_cargas:
+        minhas_cargas = df_cargas[df_cargas["Vendedor"] == nome]
+        if minhas_cargas.empty:
+            st.info("Você não tem cargas atribuídas no momento.")
+        else:
+            st.caption("Acompanhe o progresso das suas cargas.")
+            widget_cargas(minhas_cargas, df)
+
     # --- Ranking ---
     with aba_rank:
         st.subheader(f"Hoje ({hoje})")
@@ -457,14 +558,15 @@ def tela_vendedor(nome):
 
 def tela_gestor():
     st.title("Painel do Gestor")
-    df = carregar_registros()
-    hoje = agora().strftime("%d/%m/%Y")
-    mes = agora().strftime("%m/%Y")
-    df_hoje = df[df["Data"] == hoje]
-    df_mes = df[df["_mes"] == mes]
+    df        = carregar_registros()
+    df_cargas = carregar_cargas()
+    hoje      = agora().strftime("%d/%m/%Y")
+    mes       = agora().strftime("%m/%Y")
+    df_hoje   = df[df["Data"] == hoje]
+    df_mes    = df[df["_mes"] == mes]
 
-    aba_dia, aba_mes, aba_orc, aba_funil, aba_dados = st.tabs(
-        ["📅 Hoje", "📈 Mês", "💰 Orçamentos", "🔻 Funil", "🗂 Dados completos"]
+    aba_dia, aba_mes, aba_orc, aba_cargas, aba_funil, aba_dados = st.tabs(
+        ["📅 Hoje", "📈 Mês", "💰 Orçamentos", "🚛 Cargas", "🔻 Funil", "🗂 Dados completos"]
     )
 
     with aba_dia:
@@ -475,7 +577,6 @@ def tela_gestor():
         c3.metric("Vendas fechadas", len(vendas))
         c4.metric("Kg vendido", br(vendas["Kg"].sum()))
         c5.metric("R$ vendido", "R$ " + br(vendas["Valor (R$)"].sum()))
-
         sem = sorted(set(carregar_vendedores()) - set(df_hoje["Vendedor"]))
         if sem:
             st.warning("⚠️ Sem lançamentos hoje: " + ", ".join(sem))
@@ -492,7 +593,6 @@ def tela_gestor():
         c4.metric("Kg vendido", br(vendas["Kg"].sum()))
         c5.metric("R$ vendido", "R$ " + br(vendas["Valor (R$)"].sum()))
         tabela_ranking(resumir(df_mes))
-
         if not vendas.empty:
             st.subheader("Kg vendido por dia")
             por_dia = vendas.groupby("Data")["Kg"].sum()
@@ -500,10 +600,10 @@ def tela_gestor():
             st.bar_chart(por_dia.sort_index())
 
     with aba_orc:
-        orc = df[df["Resultado"] == "Orçamento enviado"]
+        orc     = df[df["Resultado"] == "Orçamento enviado"]
         abertos = orc[orc["Situação"] == SITUACAO_ABERTO]
-        aprov = orc[orc["Situação"] == SITUACAO_APROVADO]
-        perd = orc[orc["Situação"] == SITUACAO_PERDIDO]
+        aprov   = orc[orc["Situação"] == SITUACAO_APROVADO]
+        perd    = orc[orc["Situação"] == SITUACAO_PERDIDO]
         decididos = len(aprov) + len(perd)
         taxa = 100 * len(aprov) / decididos if decididos else 0
         c1, c2, c3, c4 = st.columns(4)
@@ -511,7 +611,6 @@ def tela_gestor():
         c2.metric("R$ em aberto", "R$ " + br(abertos["Valor (R$)"].sum()))
         c3.metric("Aprovados / Perdidos", f"{len(aprov)} / {len(perd)}")
         c4.metric("Taxa de aprovação", f"{taxa:.0f}%")
-
         if not orc.empty:
             st.subheader("Por vendedor")
             linhas = []
@@ -527,12 +626,65 @@ def tela_gestor():
                 "Vendedor", "Em aberto", "R$ em aberto", "Aprovados",
                 "Perdidos", "Taxa de aprovação"]),
                 hide_index=True, use_container_width=True)
-
         if not abertos.empty:
             st.subheader("Orçamentos aguardando resposta")
             st.dataframe(
                 abertos[["Data", "Vendedor", "Cliente", "Kg", "Valor (R$)"]],
                 hide_index=True, use_container_width=True)
+
+    # --- Aba Cargas ---
+    with aba_cargas:
+        st.subheader("Cadastrar nova carga")
+        vendedores_lista = list(carregar_vendedores().keys())
+        with st.form("form_nova_carga", clear_on_submit=True):
+            c1, c2, c3, c4 = st.columns(4)
+            nc_nome    = c1.text_input("Nome da carga *", placeholder="Ex: BAURU")
+            nc_data    = c2.text_input("Data de entrega *", placeholder="Ex: 20/06/2026")
+            nc_vend    = c3.selectbox("Vendedor responsável *", vendedores_lista)
+            nc_meta    = c4.number_input("Meta (Kg) *", min_value=0.0, step=100.0, format="%.0f")
+            salvar_btn = st.form_submit_button("➕ Adicionar carga", type="primary")
+            if salvar_btn:
+                if not nc_nome.strip() or not nc_data.strip() or nc_meta <= 0:
+                    st.error("Preencha todos os campos obrigatórios.")
+                else:
+                    salvar_carga(nc_nome, nc_data, nc_vend, nc_meta)
+                    st.success(f"Carga '{nc_nome}' adicionada!")
+                    st.rerun()
+
+        st.divider()
+        st.subheader(f"Cargas cadastradas ({len(df_cargas)})")
+        if df_cargas.empty:
+            st.info("Nenhuma carga ainda.")
+        else:
+            for _, carga in df_cargas.iterrows():
+                realizado = progresso_carga(carga["Carga"], df)
+                meta      = float(carga["Meta (Kg)"]) or 1.0
+                pct       = min(realizado / meta, 1.0)
+                cor       = "🟢" if pct >= 1.0 else ("🟡" if pct >= 0.6 else "🔴")
+                c1, c2 = st.columns([6, 1])
+                c1.markdown(
+                    f"**{carga['Carga']}** — {carga['Data Entrega']} — "
+                    f"{carga['Vendedor']} — Meta: {br(meta)} kg"
+                )
+                c1.progress(pct,
+                    text=f"{cor} {br(realizado)} / {br(meta)} kg  ({pct*100:.0f}%)")
+                chave_del  = f"gd_{carga['_linha']}"
+                chave_conf = f"gdc_{carga['_linha']}"
+                if st.session_state.get(chave_conf):
+                    cc1, cc2, cc3 = c2.columns([1, 1, 1]) if False else (c2, c2, c2)
+                    c2.warning("Apagar?")
+                    if c2.button("Sim", key=f"gsim_{carga['_linha']}"):
+                        deletar_carga(carga["_linha"])
+                        st.session_state.pop(chave_conf, None)
+                        st.rerun()
+                    if c2.button("Não", key=f"gnao_{carga['_linha']}"):
+                        st.session_state.pop(chave_conf, None)
+                        st.rerun()
+                else:
+                    if c2.button("🗑️", key=chave_del, help="Apagar carga"):
+                        st.session_state[chave_conf] = True
+                        st.rerun()
+                st.divider()
 
     with aba_funil:
         st.caption("Contatos → Orçamentos → Vendas (mês atual)")
@@ -552,18 +704,18 @@ def tela_gestor():
             "Vendedor",
             sorted(df["Vendedor"].unique()) if not df.empty else [],
         )
-        f_res = c2.multiselect("Resultado", RESULTADOS)
-        dados = df.copy()
+        f_res  = c2.multiselect("Resultado", RESULTADOS)
+        dados  = df.copy()
         if f_vend:
             dados = dados[dados["Vendedor"].isin(f_vend)]
         if f_res:
             dados = dados[dados["Resultado"].isin(f_res)]
-        st.dataframe(dados[CABECALHO_REGISTROS], hide_index=True,
-                     use_container_width=True)
+        colunas_exibir = [c for c in CABECALHO_REGISTROS if c in dados.columns]
+        st.dataframe(dados[colunas_exibir], hide_index=True, use_container_width=True)
         st.download_button(
             "⬇️ Baixar CSV",
-            dados[CABECALHO_REGISTROS].to_csv(index=False, sep=";",
-                                              decimal=",").encode("utf-8-sig"),
+            dados[colunas_exibir].to_csv(index=False, sep=";",
+                                         decimal=",").encode("utf-8-sig"),
             file_name=f"vendas_{agora().strftime('%Y%m%d')}.csv",
         )
         if st.button("🔄 Atualizar abas de análise na planilha"):
@@ -589,6 +741,7 @@ def main():
             carregar_registros.clear()
             carregar_vendedores.clear()
             carregar_clientes.clear()
+            carregar_cargas.clear()
             st.rerun()
 
     if usuario == "GESTOR":
