@@ -129,6 +129,12 @@ def garantir_estrutura(sh):
 @st.cache_data(ttl=60)
 def carregar_cargas():
     sh = abrir_planilha()
+    titulos = [ws.title for ws in sh.worksheets()]
+    if ABA_CARGAS not in titulos:
+        ws = sh.add_worksheet(title=ABA_CARGAS, rows=200, cols=5)
+        ws.update(values=[CABECALHO_CARGAS], range_name="A1")
+        ws.format("A1:D1", {"textFormat": {"bold": True}})
+        return pd.DataFrame(columns=CABECALHO_CARGAS + ["_linha"])
     dados = sh.worksheet(ABA_CARGAS).get_all_records(
         expected_headers=CABECALHO_CARGAS
     )
