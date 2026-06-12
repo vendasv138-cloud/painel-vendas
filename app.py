@@ -660,6 +660,15 @@ def tela_vendedor(nome):
     with aba_hoje:
         meus = df[(df["Vendedor"] == nome) & (df["Data"] == hoje)]
         st.metric("Lançamentos hoje", len(meus))
+        # DEBUG TEMPORÁRIO — remover depois
+        with st.expander("🔍 Diagnóstico (remover depois)", expanded=False):
+            st.write(f"Total linhas lidas da planilha: **{len(df)}**")
+            st.write(f"Data de hoje usada no filtro: **{hoje}**")
+            st.write(f"Vendedor buscado: **{nome}**")
+            if not df.empty:
+                st.write("Últimas 5 linhas da planilha:")
+                cols_diag = [c for c in ["Data", "Hora", "Vendedor", "Cliente", "Resultado"] if c in df.columns]
+                st.dataframe(df[cols_diag].tail(5), hide_index=True)
         if meus.empty:
             st.info("Nenhum lançamento hoje.")
         else:
