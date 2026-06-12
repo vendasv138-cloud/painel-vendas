@@ -604,12 +604,15 @@ def tela_vendedor(nome):
     # --- Orçamentos em aberto ---
     with aba_orc:
         abertos = df[
-            (df["Vendedor"] == nome) &
-            (df["Resultado"] == "Orçamento enviado") &
-            (df["Situação"] == SITUACAO_ABERTO)
+            (df["Vendedor"].astype(str).str.strip() == nome) &
+            (df["Resultado"].astype(str).str.strip() == "Orçamento enviado") &
+            (df["Situação"].astype(str).str.strip() == SITUACAO_ABERTO)
         ]
         if abertos.empty:
+            n_meus = len(df[df["Vendedor"].astype(str).str.strip() == nome])
             st.info("Nenhum orçamento em aberto.")
+            if n_meus > 0:
+                st.caption(f"Você tem {n_meus} lançamento(s) no total. Orçamentos aparecem apenas quando o resultado for **'Orçamento enviado'** — confira a aba **Meus lançamentos de hoje**.")
         else:
             st.caption("Quando o cliente responder, atualize aqui — sem redigitar nada.")
             for _, reg in abertos.iterrows():
