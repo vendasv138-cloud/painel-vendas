@@ -111,7 +111,8 @@ def garantir_estrutura(sh):
         ws.format("A1:P1", {"textFormat": {"bold": True}})
     else:
         ws = sh.worksheet(ABA_REGISTROS)
-        _adicionar_colunas_faltantes(ws, CABECALHO_REGISTROS)
+        # Sobrescreve o cabeçalho para corrigir colunas extras ou corrompidas
+        ws.update('A1', [CABECALHO_REGISTROS])
 
     if ABA_CLIENTES not in titulos:
         ws = sh.add_worksheet(title=ABA_CLIENTES, rows=2000, cols=5)
@@ -311,6 +312,8 @@ def salvar_registro(vendedor, cliente, cliente_novo, contato,
     if cliente_novo and cliente.strip().upper() not in {
             c.upper() for c in carregar_clientes()}:
         cadastrar_cliente(cliente, vendedor)
+    # table_range='A1' ancora a detecção de tabela na coluna A,
+    # evitando que o Sheets escreva em colunas erradas por desalinhamento
     ws.append_row(
         [
             ts.strftime("%d/%m/%Y"),                                   # Data
@@ -331,6 +334,7 @@ def salvar_registro(vendedor, cliente, cliente_novo, contato,
             "",                                                        # Data Resposta Orçamento
         ],
         value_input_option="RAW",
+        table_range="A1",
     )
     carregar_registros.clear()
 
