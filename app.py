@@ -228,14 +228,8 @@ def cadastrar_cliente(nome, vendedor):
 
 @st.cache_data(ttl=30)
 def carregar_registros():
-    sh  = abrir_planilha()
-    ws  = sh.worksheet(ABA_REGISTROS)
-    # Garante que todos os cabeçalhos esperados existem na planilha
-    cab = ws.row_values(1)
-    for col in CABECALHO_REGISTROS:
-        if col not in cab:
-            ws.update_cell(1, len(cab) + 1, col)
-            cab.append(col)
+    sh    = abrir_planilha()
+    ws    = sh.worksheet(ABA_REGISTROS)
     dados = ws.get_all_records()
     df = pd.DataFrame(dados)
 
