@@ -27,6 +27,8 @@ ABA_MENSAL     = "Análise Mensal"
 CABECALHO_REGISTROS = [
     "Data", "Hora", "Vendedor", "Cliente", "Tipo cliente", "Com quem falou",
     "Resultado", "Situação", "Kg", "Valor (R$)", "R$/kg", "Carga",
+    "Contato do Cliente", "Cliente Recorrente?", "Motivo da Perda",
+    "Data Resposta Orçamento",
 ]
 
 CABECALHO_CARGAS   = ["Carga", "Data Entrega", "Vendedor", "Meta (Kg)"]
@@ -37,6 +39,14 @@ SITUACAO_APROVADO = "Aprovado"
 SITUACAO_PERDIDO  = "Perdido"
 
 RESULTADOS = ["Só contato", "Orçamento enviado", "Venda fechada"]
+
+MOTIVOS_PERDA = [
+    "Preço",
+    "Concorrente entregou antes",
+    "Cliente achou qualidade baixa",
+    "Sem resposta / desistiu",
+    "Outro",
+]
 
 VENDEDORES_INICIAIS = [
     ["ANA PAULA", "1010", "SIM"],
@@ -83,20 +93,25 @@ def abrir_planilha():
     return sh
 
 
+def _adicionar_colunas_faltantes(ws, cabecalho_esperado):
+    """Adiciona ao sheet as colunas presentes em cabecalho_esperado mas ausentes na planilha."""
+    atual = ws.row_values(1)
+    for col in cabecalho_esperado:
+        if col not in atual:
+            ws.update_cell(1, len(atual) + 1, col)
+            atual.append(col)
+
+
 def garantir_estrutura(sh):
     titulos = [ws.title for ws in sh.worksheets()]
 
     if ABA_REGISTROS not in titulos:
-        ws = sh.add_worksheet(title=ABA_REGISTROS, rows=2000, cols=13)
+        ws = sh.add_worksheet(title=ABA_REGISTROS, rows=2000, cols=20)
         ws.update(values=[CABECALHO_REGISTROS], range_name="A1")
-        ws.format("A1:L1", {"textFormat": {"bold": True}})
+        ws.format("A1:P1", {"textFormat": {"bold": True}})
     else:
-        # Garante coluna "Carga" em sheets já existentes
         ws = sh.worksheet(ABA_REGISTROS)
-        cabecalho_atual = ws.row_values(1)
-        if "Carga" not in cabecalho_atual:
-            col = len(cabecalho_atual) + 1
-            ws.update_cell(1, col, "Carga")
+        _adicionar_colunas_faltantes(ws, CABECALHO_REGISTROS)
 
     if ABA_CLIENTES not in titulos:
         ws = sh.add_worksheet(title=ABA_CLIENTES, rows=2000, cols=5)
@@ -117,10 +132,10 @@ def garantir_estrutura(sh):
         ws.format("A1:D1", {"textFormat": {"bold": True}})
 
     if ABA_DIARIA not in titulos:
-        sh.add_worksheet(title=ABA_DIARIA, rows=100, cols=10)
+        sh.add_worksheet(title=ABA_DIARIA, rows=100, cols=15)
 
     if ABA_MENSAL not in titulos:
-        sh.add_worksheet(title=ABA_MENSAL, rows=500, cols=12)
+        sh.add_worksheet(title=ABA_MENSAL, rows=500, cols=15)
 
 
 # ----------------------------------------------------------------------------
@@ -215,18 +230,26 @@ def cadastrar_cliente(nome, vendedor):
 def carregar_registros():
     sh  = abrir_planilha()
     ws  = sh.worksheet(ABA_REGISTROS)
-    # Garante que o cabeçalho "Carga" existe na planilha antes de ler
+    # Garante que todos os cabeçalhos esperados existem na planilha
     cab = ws.row_values(1)
-    if "Carga" not in cab:
-        ws.update_cell(1, len(cab) + 1, "Carga")
+    for col in CABECALHO_REGISTROS:
+        if col not in cab:
+            ws.update_cell(1, len(cab) + 1, col)
+            cab.append(col)
     dados = ws.get_all_records()
     df = pd.DataFrame(dados)
+
+    colunas_extras = ["_data", "_mes", "_linha", "Dias em Aberto", "Tempo até Resposta (dias)"]
     if df.empty:
-        return pd.DataFrame(columns=CABECALHO_REGISTROS + ["_data", "_mes", "_linha"])
+        return pd.DataFrame(columns=CABECALHO_REGISTROS + colunas_extras)
+
     df["_linha"] = df.index + 2
 
-    if "Carga" not in df.columns:
-        df["Carga"] = ""
+    # Garante colunas novas no DataFrame para registros antigos
+    for col in ("Carga", "Contato do Cliente", "Cliente Recorrente?",
+                "Motivo da Perda", "Data Resposta Orçamento"):
+        if col not in df.columns:
+            df[col] = ""
 
     for col in ("Kg", "Valor (R$)", "R$/kg"):
         if col not in df.columns:
@@ -241,11 +264,35 @@ def carregar_registros():
 
     df["_data"] = pd.to_datetime(df["Data"], format="%d/%m/%Y", errors="coerce")
     df["_mes"]  = df["_data"].dt.strftime("%m/%Y")
+
+    # Campo calculado: dias em aberto (somente orçamentos em aberto)
+    hoje_dt = pd.Timestamp(agora().date())
+    df["Dias em Aberto"] = pd.NA
+    mask_aberto = (
+        (df["Resultado"] == "Orçamento enviado") &
+        (df["Situação"] == SITUACAO_ABERTO) &
+        df["_data"].notna()
+    )
+    df.loc[mask_aberto, "Dias em Aberto"] = (hoje_dt - df.loc[mask_aberto, "_data"]).dt.days
+
+    # Campo calculado: tempo até resposta (linhas com Data Resposta preenchida)
+    df["Tempo até Resposta (dias)"] = pd.NA
+    mask_resp = df["Data Resposta Orçamento"].astype(str).str.strip() != ""
+    if mask_resp.any():
+        data_resp = pd.to_datetime(
+            df.loc[mask_resp, "Data Resposta Orçamento"],
+            format="%d/%m/%Y", errors="coerce"
+        )
+        df.loc[mask_resp, "Tempo até Resposta (dias)"] = (
+            data_resp - df.loc[mask_resp, "_data"]
+        ).dt.days
+
     return df
 
 
 def salvar_registro(vendedor, cliente, cliente_novo, contato,
-                    resultado, kg, valor, carga=""):
+                    resultado, kg, valor, carga="",
+                    contato_cliente="", recorrente=False, motivo_perda=""):
     sh = abrir_planilha()
     ws = sh.worksheet(ABA_REGISTROS)
     ts = agora()
@@ -255,18 +302,22 @@ def salvar_registro(vendedor, cliente, cliente_novo, contato,
         cadastrar_cliente(cliente, vendedor)
     ws.append_row(
         [
-            ts.strftime("%d/%m/%Y"),
-            ts.strftime("%H:%M"),
-            vendedor,
-            cliente.strip(),
-            "Novo" if cliente_novo else "Carteira",
-            contato.strip(),
-            resultado,
-            SITUACAO_ABERTO if resultado == "Orçamento enviado" else "-",
-            round(float(kg or 0), 2),
-            round(float(valor or 0), 2),
-            preco_kg,
-            carga or "",
+            ts.strftime("%d/%m/%Y"),                                   # Data
+            ts.strftime("%H:%M"),                                      # Hora
+            vendedor,                                                  # Vendedor
+            cliente.strip(),                                           # Cliente
+            "Novo" if cliente_novo else "Carteira",                    # Tipo cliente
+            contato.strip(),                                           # Com quem falou
+            resultado,                                                 # Resultado
+            SITUACAO_ABERTO if resultado == "Orçamento enviado" else "-",  # Situação
+            round(float(kg or 0), 2),                                  # Kg
+            round(float(valor or 0), 2),                               # Valor (R$)
+            preco_kg,                                                  # R$/kg
+            carga or "",                                               # Carga
+            contato_cliente or "",                                     # Contato do Cliente
+            "SIM" if recorrente else "",                               # Cliente Recorrente?
+            motivo_perda or "",                                        # Motivo da Perda
+            "",                                                        # Data Resposta Orçamento
         ],
         value_input_option="RAW",
     )
@@ -277,23 +328,36 @@ def salvar_registro(vendedor, cliente, cliente_novo, contato,
         pass
 
 
+def _atualizar_celula(linha_planilha, nome_col, valor):
+    sh  = abrir_planilha()
+    col = CABECALHO_REGISTROS.index(nome_col) + 1
+    sh.worksheet(ABA_REGISTROS).update_cell(int(linha_planilha), col, valor)
+
+
 def mudar_situacao(linha_planilha, nova):
-    sh = abrir_planilha()
-    col = CABECALHO_REGISTROS.index("Situação") + 1
-    sh.worksheet(ABA_REGISTROS).update_cell(int(linha_planilha), col, nova)
+    _atualizar_celula(linha_planilha, "Situação", nova)
     carregar_registros.clear()
 
 
 def aprovar_orcamento(reg):
     mudar_situacao(reg["_linha"], SITUACAO_APROVADO)
-    salvar_registro(reg["Vendedor"], reg["Cliente"], False,
-                    str(reg["Com quem falou"]), "Venda fechada",
-                    float(reg["Kg"]), float(reg["Valor (R$)"]),
-                    str(reg.get("Carga", "")))
+    _atualizar_celula(reg["_linha"], "Data Resposta Orçamento",
+                      agora().strftime("%d/%m/%Y"))
+    salvar_registro(
+        reg["Vendedor"], reg["Cliente"], False,
+        str(reg["Com quem falou"]), "Venda fechada",
+        float(reg["Kg"]), float(reg["Valor (R$)"]),
+        str(reg.get("Carga", "")),
+    )
 
 
-def perder_orcamento(reg):
+def perder_orcamento(reg, motivo=""):
     mudar_situacao(reg["_linha"], SITUACAO_PERDIDO)
+    _atualizar_celula(reg["_linha"], "Data Resposta Orçamento",
+                      agora().strftime("%d/%m/%Y"))
+    if motivo:
+        _atualizar_celula(reg["_linha"], "Motivo da Perda", motivo)
+    carregar_registros.clear()
     try:
         atualizar_abas_analise()
     except Exception:
@@ -313,9 +377,11 @@ def deletar_registro(linha_planilha):
 # ----------------------------------------------------------------------------
 # Resumos
 # ----------------------------------------------------------------------------
-COLUNAS_RESUMO = ["Vendedor", "Lançamentos", "Clientes novos", "Orçamentos",
-                  "Vendas", "Kg vendido", "R$ vendido", "R$/kg médio",
-                  "Conversão (%)"]
+COLUNAS_RESUMO = [
+    "Vendedor", "Lançamentos", "Clientes novos", "Orçamentos",
+    "Vendas", "Kg vendido", "R$ vendido", "R$/kg médio",
+    "Conversão (%)", "Taxa Perda (%)", "Recorrentes (%)",
+]
 
 
 def resumir(df):
@@ -323,20 +389,52 @@ def resumir(df):
         return pd.DataFrame(columns=COLUNAS_RESUMO)
     linhas = []
     for vend, g in df.groupby("Vendedor"):
-        vendas = g[g["Resultado"] == "Venda fechada"]
-        orcs   = g[g["Resultado"] == "Orçamento enviado"]
-        novos  = g[g["Tipo cliente"] == "Novo"]
-        kg     = vendas["Kg"].sum()
-        rs     = vendas["Valor (R$)"].sum()
-        conv   = 100 * len(vendas) / len(g) if len(g) else 0
+        vendas   = g[g["Resultado"] == "Venda fechada"]
+        orcs     = g[g["Resultado"] == "Orçamento enviado"]
+        perdidos = g[g["Situação"] == SITUACAO_PERDIDO] if "Situação" in g.columns else pd.DataFrame()
+        novos    = g[g["Tipo cliente"] == "Novo"] if "Tipo cliente" in g.columns else pd.DataFrame()
+        recorr   = (g[g["Cliente Recorrente?"].astype(str).str.upper() == "SIM"]
+                    if "Cliente Recorrente?" in g.columns else pd.DataFrame())
+        kg  = vendas["Kg"].sum()
+        rs  = vendas["Valor (R$)"].sum()
+        dec_conv  = len(vendas) + len(orcs)
+        dec_perda = len(vendas) + len(perdidos)
+        conv  = 100 * len(vendas) / dec_conv  if dec_conv  > 0 else 0.0
+        perda = 100 * len(perdidos) / dec_perda if dec_perda > 0 else 0.0
+        recorr_pct = 100 * len(recorr) / len(g) if len(g) > 0 else 0.0
         linhas.append([
             vend, len(g), len(novos), len(orcs), len(vendas),
             round(kg, 2), round(rs, 2),
-            round(rs / kg, 2) if kg else 0, round(conv, 1),
+            round(rs / kg, 2) if kg else 0.0,
+            round(conv, 1), round(perda, 1), round(recorr_pct, 1),
         ])
     out = pd.DataFrame(linhas, columns=COLUNAS_RESUMO)
     return out.sort_values(["Kg vendido", "R$ vendido", "Lançamentos"],
                            ascending=False).reset_index(drop=True)
+
+
+def _kpis(df):
+    """KPIs consolidados para um período."""
+    vendas   = df[df["Resultado"] == "Venda fechada"]
+    orcs     = df[df["Resultado"] == "Orçamento enviado"]
+    perdidos = df[df["Situação"] == SITUACAO_PERDIDO] if "Situação" in df.columns else pd.DataFrame()
+    recorr   = (df[df["Cliente Recorrente?"].astype(str).str.upper() == "SIM"]
+                if "Cliente Recorrente?" in df.columns else pd.DataFrame())
+    kg  = vendas["Kg"].sum()
+    rs  = vendas["Valor (R$)"].sum()
+    dec_conv  = len(vendas) + len(orcs)
+    dec_perda = len(vendas) + len(perdidos)
+    return {
+        "n_vendas":   len(vendas),
+        "n_orcs":     len(orcs),
+        "n_perdidos": len(perdidos),
+        "kg":         kg,
+        "rs":         rs,
+        "ticket":     rs / len(vendas) if len(vendas) > 0 else 0.0,
+        "conv":       100 * len(vendas) / dec_conv  if dec_conv  > 0 else 0.0,
+        "perda_pct":  100 * len(perdidos) / dec_perda if dec_perda > 0 else 0.0,
+        "recorr_pct": 100 * len(recorr) / len(df)  if len(df)   > 0 else 0.0,
+    }
 
 
 def atualizar_abas_analise():
@@ -353,7 +451,6 @@ def atualizar_abas_analise():
     valores += res_dia.astype(object).values.tolist()
     valores += [[], ["Sem lançamentos hoje:", ", ".join(sem_lanc) or "ninguém"]]
     ws.update(values=valores, range_name="A1")
-    ws.format("A3:I3", {"textFormat": {"bold": True}})
 
     ws = sh.worksheet(ABA_MENSAL)
     ws.clear()
@@ -363,7 +460,6 @@ def atualizar_abas_analise():
         for linha in res_mes.astype(object).values.tolist():
             valores.append([mes] + linha)
     ws.update(values=valores, range_name="A1")
-    ws.format("A3:J3", {"textFormat": {"bold": True}})
 
 
 # ----------------------------------------------------------------------------
@@ -375,9 +471,12 @@ def tabela_ranking(res, destaque=None):
         return
     res = res.copy()
     res.insert(0, "Posição", [f"{i}º" for i in range(1, len(res) + 1)])
-    res["Kg vendido"]  = res["Kg vendido"].map(lambda v: br(v))
-    res["R$ vendido"]  = res["R$ vendido"].map(lambda v: "R$ " + br(v))
-    res["R$/kg médio"] = res["R$/kg médio"].map(lambda v: "R$ " + br(v))
+    res["Kg vendido"]      = res["Kg vendido"].map(br)
+    res["R$ vendido"]      = res["R$ vendido"].map(lambda v: "R$ " + br(v))
+    res["R$/kg médio"]     = res["R$/kg médio"].map(lambda v: "R$ " + br(v))
+    res["Conversão (%)"]   = res["Conversão (%)"].map(lambda v: f"{v:.1f}%")
+    res["Taxa Perda (%)"]  = res["Taxa Perda (%)"].map(lambda v: f"{v:.1f}%")
+    res["Recorrentes (%)"] = res["Recorrentes (%)"].map(lambda v: f"{v:.1f}%")
     st.dataframe(res, hide_index=True, use_container_width=True)
     if destaque is not None and destaque in res["Vendedor"].values:
         pos = res.loc[res["Vendedor"] == destaque, "Posição"].iloc[0]
@@ -385,7 +484,6 @@ def tabela_ranking(res, destaque=None):
 
 
 def widget_cargas(df_cargas, df_registros, filtro_vendedor=None):
-    """Exibe cada carga com barra de progresso."""
     if df_cargas.empty:
         st.info("Nenhuma carga cadastrada ainda.")
         return
@@ -404,6 +502,9 @@ def widget_cargas(df_cargas, df_registros, filtro_vendedor=None):
         st.divider()
 
 
+# ----------------------------------------------------------------------------
+# Tela Login
+# ----------------------------------------------------------------------------
 def tela_login():
     st.title("📊 Painel de Vendas")
     vendedores = carregar_vendedores()
@@ -429,6 +530,9 @@ def tela_login():
                 st.error("PIN/senha incorreto. Tente novamente.")
 
 
+# ----------------------------------------------------------------------------
+# Tela Vendedor
+# ----------------------------------------------------------------------------
 def tela_vendedor(nome):
     st.title(f"Olá, {nome.title()}!")
     if "flash" in st.session_state:
@@ -439,37 +543,32 @@ def tela_vendedor(nome):
          "📋 Meus lançamentos de hoje", "🚛 Cargas", "🏆 Ranking"]
     )
 
-    df         = carregar_registros()
-    df_cargas  = carregar_cargas()
-    hoje       = agora().strftime("%d/%m/%Y")
-    mes        = agora().strftime("%m/%Y")
-
-    # Chave de versão para limpar o formulário após salvar
-    fv = st.session_state.get("form_ver", 0)
+    df        = carregar_registros()
+    df_cargas = carregar_cargas()
+    hoje      = agora().strftime("%d/%m/%Y")
+    mes       = agora().strftime("%m/%Y")
+    fv        = st.session_state.get("form_ver", 0)
 
     # --- Nova venda ---
     with aba_nova:
-        # Selectbox de carga (obrigatório)
         opcoes_carga = list(df_cargas["Carga"]) if not df_cargas.empty else []
         if opcoes_carga:
-            carga_sel = st.selectbox(
-                "🚛 Carga *",
-                opcoes_carga,
-                key=f"carga_{fv}",
-            )
-            carga_val = carga_sel
+            carga_val = st.selectbox("🚛 Carga *", opcoes_carga, key=f"carga_{fv}")
         else:
             st.warning("Nenhuma carga cadastrada. Peça ao gestor para cadastrar antes de lançar.")
             carga_val = ""
 
         c1, c2 = st.columns(2)
-        cliente     = c1.text_input("Cliente *", key=f"cli_{fv}")
-        tipo        = c1.radio("Tipo de cliente *", ["Carteira", "Novo"],
-                               horizontal=True, key=f"tipo_{fv}")
-        cliente_novo = tipo == "Novo"
-        contato     = c2.text_input("Com quem falou", key=f"cont_{fv}")
-        resultado   = st.radio("Resultado do contato *", RESULTADOS,
-                               horizontal=True, key=f"res_{fv}")
+        cliente          = c1.text_input("Cliente *", key=f"cli_{fv}")
+        contato_cliente  = c1.text_input("Contato do cliente (WhatsApp/Email)",
+                                          placeholder="Opcional", key=f"ctcli_{fv}")
+        tipo             = c1.radio("Tipo de cliente *", ["Carteira", "Novo"],
+                                    horizontal=True, key=f"tipo_{fv}")
+        cliente_novo     = tipo == "Novo"
+        recorrente       = c1.checkbox("Cliente já comprou antes?", key=f"recorr_{fv}")
+        contato          = c2.text_input("Com quem falou", key=f"cont_{fv}")
+        resultado        = st.radio("Resultado do contato *", RESULTADOS,
+                                    horizontal=True, key=f"res_{fv}")
 
         kg = valor = 0.0
         if resultado != "Só contato":
@@ -489,8 +588,12 @@ def tela_vendedor(nome):
             elif resultado != "Só contato" and (kg <= 0 or valor <= 0):
                 st.error("Para orçamento ou venda, informe Kg e Valor.")
             else:
-                salvar_registro(nome, cliente, cliente_novo, contato,
-                                resultado, kg, valor, carga_val)
+                salvar_registro(
+                    nome, cliente, cliente_novo, contato,
+                    resultado, kg, valor, carga_val,
+                    contato_cliente=contato_cliente,
+                    recorrente=recorrente,
+                )
                 msg = "Lançamento registrado!"
                 if cliente_novo:
                     msg += f" Cliente novo '{cliente.strip()}' cadastrado."
@@ -501,29 +604,55 @@ def tela_vendedor(nome):
 
     # --- Orçamentos em aberto ---
     with aba_orc:
-        abertos = df[(df["Vendedor"] == nome)
-                     & (df["Resultado"] == "Orçamento enviado")
-                     & (df["Situação"] == SITUACAO_ABERTO)]
+        abertos = df[
+            (df["Vendedor"] == nome) &
+            (df["Resultado"] == "Orçamento enviado") &
+            (df["Situação"] == SITUACAO_ABERTO)
+        ]
         if abertos.empty:
             st.info("Nenhum orçamento em aberto.")
         else:
             st.caption("Quando o cliente responder, atualize aqui — sem redigitar nada.")
             for _, reg in abertos.iterrows():
+                dias = reg.get("Dias em Aberto", pd.NA)
+                dias_str = ""
+                if pd.notna(dias) and dias != "":
+                    dias_num = int(dias)
+                    dias_str = f" ⚠️ {dias_num} dias aberto" if dias_num > 5 else f" ({dias_num}d)"
                 c1, c2, c3 = st.columns([3, 1, 1])
                 c1.write(
                     f"**{reg['Cliente']}** — {reg['Data']} — "
-                    f"{br(reg['Kg'])} kg — R$ {br(reg['Valor (R$)'])}"
+                    f"{br(reg['Kg'])} kg — R$ {br(reg['Valor (R$)'])}{dias_str}"
                 )
                 if c2.button("✅ Aprovou", key=f"ap{reg['_linha']}"):
                     aprovar_orcamento(reg)
                     st.session_state["flash"] = (
                         f"Orçamento de {reg['Cliente']} convertido em venda fechada!")
                     st.rerun()
-                if c3.button("❌ Perdido", key=f"pd{reg['_linha']}"):
-                    perder_orcamento(reg)
-                    st.session_state["flash"] = (
-                        f"Orçamento de {reg['Cliente']} marcado como perdido.")
-                    st.rerun()
+
+                # Perdido: abre dropdown de motivo antes de confirmar
+                chave_perd = f"perd_motivo_{reg['_linha']}"
+                if st.session_state.get(chave_perd):
+                    cm1, cm2, cm3 = st.columns([3, 1, 1])
+                    motivo_sel = cm1.selectbox(
+                        "Motivo da perda (opcional)",
+                        ["— Não informado —"] + MOTIVOS_PERDA,
+                        key=f"mot_{reg['_linha']}",
+                    )
+                    if cm2.button("Confirmar", key=f"conf_perd_{reg['_linha']}", type="primary"):
+                        motivo_final = "" if motivo_sel == "— Não informado —" else motivo_sel
+                        perder_orcamento(reg, motivo=motivo_final)
+                        st.session_state.pop(chave_perd, None)
+                        st.session_state["flash"] = (
+                            f"Orçamento de {reg['Cliente']} marcado como perdido.")
+                        st.rerun()
+                    if cm3.button("Cancelar", key=f"canc_perd_{reg['_linha']}"):
+                        st.session_state.pop(chave_perd, None)
+                        st.rerun()
+                else:
+                    if c3.button("❌ Perdido", key=f"pd{reg['_linha']}"):
+                        st.session_state[chave_perd] = True
+                        st.rerun()
 
     # --- Meus lançamentos de hoje ---
     with aba_hoje:
@@ -574,6 +703,9 @@ def tela_vendedor(nome):
         tabela_ranking(resumir(df[df["_mes"] == mes]), destaque=nome)
 
 
+# ----------------------------------------------------------------------------
+# Tela Gestor
+# ----------------------------------------------------------------------------
 def tela_gestor():
     st.title("Painel do Gestor")
     df        = carregar_registros()
@@ -583,18 +715,41 @@ def tela_gestor():
     df_hoje   = df[df["Data"] == hoje]
     df_mes    = df[df["_mes"] == mes]
 
-    aba_dia, aba_mes, aba_orc, aba_cargas, aba_funil, aba_dados = st.tabs(
-        ["📅 Hoje", "📈 Mês", "💰 Orçamentos", "🚛 Cargas", "🔻 Funil", "🗂 Dados completos"]
+    # Orçamentos vencidos (todos, não só hoje)
+    orc_todos_abertos = df[
+        (df["Resultado"] == "Orçamento enviado") &
+        (df["Situação"] == SITUACAO_ABERTO)
+    ]
+    dias_num  = pd.to_numeric(orc_todos_abertos.get("Dias em Aberto", pd.Series(dtype=str)),
+                               errors="coerce")
+    n_vencidos = int((dias_num > 5).sum())
+
+    aba_dia, aba_mes, aba_orc, aba_cargas, aba_funil, aba_perdas, aba_dados = st.tabs(
+        ["📅 Hoje", "📈 Mês", "💰 Orçamentos", "🚛 Cargas",
+         "🔻 Funil", "📊 Análise de Perdas", "🗂 Dados completos"]
     )
 
+    # --- Hoje ---
     with aba_dia:
-        vendas = df_hoje[df_hoje["Resultado"] == "Venda fechada"]
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Lançamentos", len(df_hoje))
-        c2.metric("Clientes novos", int((df_hoje["Tipo cliente"] == "Novo").sum()))
-        c3.metric("Vendas fechadas", len(vendas))
-        c4.metric("Kg vendido", br(vendas["Kg"].sum()))
-        c5.metric("R$ vendido", "R$ " + br(vendas["Valor (R$)"].sum()))
+        kpis = _kpis(df_hoje)
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        c1.metric("Lançamentos",     len(df_hoje))
+        c2.metric("Clientes novos",  int((df_hoje["Tipo cliente"] == "Novo").sum())
+                  if "Tipo cliente" in df_hoje.columns else 0)
+        c3.metric("Vendas fechadas", kpis["n_vendas"])
+        c4.metric("Kg vendido",      br(kpis["kg"]))
+        c5.metric("R$ vendido",      "R$ " + br(kpis["rs"]))
+        c6.metric("Ticket médio",    "R$ " + br(kpis["ticket"]))
+
+        c1b, c2b, c3b, c4b = st.columns(4)
+        c1b.metric("Taxa conversão",        f"{kpis['conv']:.0f}%")
+        c2b.metric("Taxa de perda",         f"{kpis['perda_pct']:.0f}%")
+        c3b.metric("Recorrência",           f"{kpis['recorr_pct']:.0f}%")
+        c4b.metric("Orçamentos vencidos +5d", n_vencidos)
+
+        if n_vencidos > 0:
+            st.warning(f"⚠️ {n_vencidos} orçamento(s) sem resposta há mais de 5 dias — veja a aba Orçamentos.")
+
         sem = sorted(set(carregar_vendedores()) - set(df_hoje["Vendedor"]))
         if sem:
             st.warning("⚠️ Sem lançamentos hoje: " + ", ".join(sem))
@@ -602,21 +757,32 @@ def tela_gestor():
             st.success("Todos os vendedores lançaram hoje.")
         tabela_ranking(resumir(df_hoje))
 
+    # --- Mês ---
     with aba_mes:
-        vendas = df_mes[df_mes["Resultado"] == "Venda fechada"]
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Lançamentos", len(df_mes))
-        c2.metric("Clientes novos", int((df_mes["Tipo cliente"] == "Novo").sum()))
-        c3.metric("Vendas fechadas", len(vendas))
-        c4.metric("Kg vendido", br(vendas["Kg"].sum()))
-        c5.metric("R$ vendido", "R$ " + br(vendas["Valor (R$)"].sum()))
+        kpis = _kpis(df_mes)
+        vendas_mes = df_mes[df_mes["Resultado"] == "Venda fechada"]
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        c1.metric("Lançamentos",     len(df_mes))
+        c2.metric("Clientes novos",  int((df_mes["Tipo cliente"] == "Novo").sum())
+                  if "Tipo cliente" in df_mes.columns else 0)
+        c3.metric("Vendas fechadas", kpis["n_vendas"])
+        c4.metric("Kg vendido",      br(kpis["kg"]))
+        c5.metric("R$ vendido",      "R$ " + br(kpis["rs"]))
+        c6.metric("Ticket médio",    "R$ " + br(kpis["ticket"]))
+
+        c1b, c2b, c3b = st.columns(3)
+        c1b.metric("Taxa conversão", f"{kpis['conv']:.0f}%")
+        c2b.metric("Taxa de perda",  f"{kpis['perda_pct']:.0f}%")
+        c3b.metric("Recorrência",    f"{kpis['recorr_pct']:.0f}%")
+
         tabela_ranking(resumir(df_mes))
-        if not vendas.empty:
+        if not vendas_mes.empty:
             st.subheader("Kg vendido por dia")
-            por_dia = vendas.groupby("Data")["Kg"].sum()
+            por_dia = vendas_mes.groupby("Data")["Kg"].sum()
             por_dia.index = pd.to_datetime(por_dia.index, format="%d/%m/%Y")
             st.bar_chart(por_dia.sort_index())
 
+    # --- Orçamentos ---
     with aba_orc:
         orc     = df[df["Resultado"] == "Orçamento enviado"]
         abertos = orc[orc["Situação"] == SITUACAO_ABERTO]
@@ -625,10 +791,21 @@ def tela_gestor():
         decididos = len(aprov) + len(perd)
         taxa = 100 * len(aprov) / decididos if decididos else 0
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Em aberto", len(abertos))
-        c2.metric("R$ em aberto", "R$ " + br(abertos["Valor (R$)"].sum()))
+        c1.metric("Em aberto",          len(abertos))
+        c2.metric("R$ em aberto",       "R$ " + br(abertos["Valor (R$)"].sum()))
         c3.metric("Aprovados / Perdidos", f"{len(aprov)} / {len(perd)}")
-        c4.metric("Taxa de aprovação", f"{taxa:.0f}%")
+        c4.metric("Taxa de aprovação",  f"{taxa:.0f}%")
+
+        if n_vencidos > 0:
+            vencidos_df = orc_todos_abertos[
+                pd.to_numeric(orc_todos_abertos.get("Dias em Aberto",
+                              pd.Series(dtype=str)), errors="coerce") > 5
+            ]
+            st.warning(f"⚠️ {n_vencidos} orçamento(s) sem resposta há mais de 5 dias:")
+            cols_v = [c for c in ["Data", "Vendedor", "Cliente", "Kg",
+                                   "Valor (R$)", "Dias em Aberto"] if c in vencidos_df.columns]
+            st.dataframe(vencidos_df[cols_v], hide_index=True, use_container_width=True)
+
         if not orc.empty:
             st.subheader("Por vendedor")
             linhas = []
@@ -637,20 +814,25 @@ def tela_gestor():
                 ap = g[g["Situação"] == SITUACAO_APROVADO]
                 pe = g[g["Situação"] == SITUACAO_PERDIDO]
                 dec = len(ap) + len(pe)
-                linhas.append([vend, len(ab), "R$ " + br(ab["Valor (R$)"].sum()),
-                               len(ap), len(pe),
-                               f"{100 * len(ap) / dec:.0f}%" if dec else "-"])
-            st.dataframe(pd.DataFrame(linhas, columns=[
-                "Vendedor", "Em aberto", "R$ em aberto", "Aprovados",
-                "Perdidos", "Taxa de aprovação"]),
-                hide_index=True, use_container_width=True)
+                linhas.append([
+                    vend, len(ab), "R$ " + br(ab["Valor (R$)"].sum()),
+                    len(ap), len(pe),
+                    f"{100 * len(ap) / dec:.0f}%" if dec else "-",
+                ])
+            st.dataframe(
+                pd.DataFrame(linhas, columns=[
+                    "Vendedor", "Em aberto", "R$ em aberto",
+                    "Aprovados", "Perdidos", "Taxa de aprovação",
+                ]),
+                hide_index=True, use_container_width=True,
+            )
         if not abertos.empty:
             st.subheader("Orçamentos aguardando resposta")
-            st.dataframe(
-                abertos[["Data", "Vendedor", "Cliente", "Kg", "Valor (R$)"]],
-                hide_index=True, use_container_width=True)
+            cols_a = [c for c in ["Data", "Vendedor", "Cliente", "Kg",
+                                   "Valor (R$)", "Dias em Aberto"] if c in abertos.columns]
+            st.dataframe(abertos[cols_a], hide_index=True, use_container_width=True)
 
-    # --- Aba Cargas ---
+    # --- Cargas ---
     with aba_cargas:
         st.subheader("Cadastrar nova carga")
         vendedores_lista = list(carregar_vendedores().keys())
@@ -674,19 +856,14 @@ def tela_gestor():
         if df_cargas.empty:
             st.info("Nenhuma carga ainda.")
         else:
-            # Agrupa por nome da carga para mostrar resumo consolidado
             for nome_carga, grupo in df_cargas.groupby("Carga", sort=False):
                 data_entrega   = grupo["Data Entrega"].iloc[0]
                 vendedores_str = ", ".join(grupo["Vendedor"].tolist())
                 meta_total     = float(grupo["Meta (Kg)"].sum())
-                realiz_total   = sum(
-                    progresso_carga(nome_carga, df)
-                    for _ in [1]  # calcula uma vez para o grupo todo
-                )
+                realiz_total   = progresso_carga(nome_carga, df)
                 pct_total = min(realiz_total / meta_total, 1.0) if meta_total else 0.0
                 cor_total = "🟢" if pct_total >= 1.0 else ("🟡" if pct_total >= 0.6 else "🔴")
 
-                # Cabeçalho do grupo
                 st.markdown(
                     f"### 🚛 {nome_carga} &nbsp;|&nbsp; {data_entrega} &nbsp;|&nbsp; "
                     f"Vendedores: {vendedores_str} &nbsp;|&nbsp; Total meta: **{br(meta_total)} kg**"
@@ -696,7 +873,6 @@ def tela_gestor():
                     text=f"{cor_total} Total realizado: {br(realiz_total)} / {br(meta_total)} kg  ({pct_total*100:.0f}%)"
                 )
 
-                # Detalhamento por vendedor
                 for _, carga in grupo.iterrows():
                     realizado = progresso_carga(carga["Carga"], df, vendedor=carga["Vendedor"])
                     meta      = float(carga["Meta (Kg)"]) or 1.0
@@ -722,6 +898,7 @@ def tela_gestor():
                             st.rerun()
                 st.divider()
 
+    # --- Funil ---
     with aba_funil:
         st.caption("Contatos → Orçamentos → Vendas (mês atual)")
         res = resumir(df_mes)
@@ -729,11 +906,98 @@ def tela_gestor():
             st.info("Sem dados no mês.")
         else:
             fun = res[["Vendedor", "Lançamentos", "Orçamentos", "Vendas",
-                       "Conversão (%)"]]
+                       "Conversão (%)", "Taxa Perda (%)"]]
             st.dataframe(fun, hide_index=True, use_container_width=True)
-            st.bar_chart(res.set_index("Vendedor")[
-                ["Lançamentos", "Orçamentos", "Vendas"]])
+            st.bar_chart(res.set_index("Vendedor")[["Lançamentos", "Orçamentos", "Vendas"]])
 
+    # --- Análise de Perdas ---
+    with aba_perdas:
+        st.subheader("Análise de Perdas")
+        perdidos_df = df[df["Situação"] == SITUACAO_PERDIDO].copy()
+
+        if perdidos_df.empty:
+            st.info("Nenhuma perda registrada ainda.")
+        else:
+            periodo = st.radio("Período:", ["Mês atual", "Todos os meses"],
+                               horizontal=True, key="perd_periodo")
+            if periodo == "Mês atual":
+                perdidos_df = perdidos_df[perdidos_df["_mes"] == mes]
+
+            if perdidos_df.empty:
+                st.info("Nenhuma perda no período selecionado.")
+            else:
+                total_perd = len(perdidos_df)
+                vendas_periodo = df[df["Resultado"] == "Venda fechada"]
+                if periodo == "Mês atual":
+                    vendas_periodo = vendas_periodo[vendas_periodo["_mes"] == mes]
+                total_vend = len(vendas_periodo)
+                dec_total  = total_vend + total_perd
+                taxa_perd  = 100 * total_perd / dec_total if dec_total > 0 else 0.0
+
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Perdas no período", total_perd)
+                c2.metric("Vendas fechadas",   total_vend)
+                c3.metric("Taxa de perda",     f"{taxa_perd:.0f}%")
+                if taxa_perd > 25:
+                    st.warning("⚠️ Taxa de perda acima de 25% — investigar causas.")
+
+                st.divider()
+
+                # Por motivo
+                col_m = "Motivo da Perda"
+                motivos = (perdidos_df[col_m].astype(str).str.strip()
+                           .replace("", "Não informado"))
+                contagem = motivos.value_counts().reset_index()
+                contagem.columns = ["Motivo", "Qtd"]
+                contagem["% do Total"] = (
+                    contagem["Qtd"] / total_perd * 100
+                ).round(1).astype(str) + "%"
+
+                st.subheader("Por motivo")
+                st.dataframe(contagem, hide_index=True, use_container_width=True)
+                st.bar_chart(contagem.set_index("Motivo")["Qtd"])
+
+                # Por vendedor
+                st.subheader("Por vendedor")
+                linhas_v = []
+                for vend, g in perdidos_df.groupby("Vendedor"):
+                    vend_vendas = vendas_periodo[vendas_periodo["Vendedor"] == vend]
+                    dec_v = len(vend_vendas) + len(g)
+                    taxa_v = 100 * len(g) / dec_v if dec_v > 0 else 0.0
+                    top_mot = (g[col_m].astype(str).str.strip()
+                               .replace("", "Não informado")
+                               .value_counts())
+                    motivo_top = top_mot.index[0] if not top_mot.empty else "—"
+                    linhas_v.append([vend, len(g), f"{taxa_v:.0f}%", motivo_top])
+                st.dataframe(
+                    pd.DataFrame(linhas_v, columns=[
+                        "Vendedor", "Perdas", "Taxa Perda", "Motivo principal"
+                    ]),
+                    hide_index=True, use_container_width=True,
+                )
+
+                # Recomendação automática
+                top_motivo = motivos.value_counts().index[0] if not motivos.empty else ""
+                recomendacoes = {
+                    "Preço":
+                        "**Preço** é o motivo principal. Revise a estratégia de precificação ou o mix de produto.",
+                    "Concorrente entregou antes":
+                        "**Timing** é o gargalo. Verifique se há como acelerar produção ou prazos de entrega.",
+                    "Cliente achou qualidade baixa":
+                        "**Qualidade percebida** precisa de atenção. Revise especificações ou comunicação técnica.",
+                    "Sem resposta / desistiu":
+                        "Muitos clientes desapareceram. Melhore o **follow-up** nos orçamentos em aberto.",
+                    "Outro":
+                        "Motivos variados — incentive os vendedores a detalhar melhor o motivo da perda.",
+                    "Não informado":
+                        "Maioria das perdas sem motivo registrado — oriente os vendedores a informar ao marcar como perdido.",
+                }
+                rec = recomendacoes.get(top_motivo, "")
+                if rec:
+                    st.divider()
+                    st.info(f"💡 Recomendação: {rec}")
+
+    # --- Dados completos ---
     with aba_dados:
         c1, c2 = st.columns(2)
         f_vend = c1.multiselect(
@@ -751,7 +1015,7 @@ def tela_gestor():
         st.download_button(
             "⬇️ Baixar CSV",
             dados[colunas_exibir].to_csv(index=False, sep=";",
-                                         decimal=",").encode("utf-8-sig"),
+                                          decimal=",").encode("utf-8-sig"),
             file_name=f"vendas_{agora().strftime('%Y%m%d')}.csv",
         )
         if st.button("🔄 Atualizar abas de análise na planilha"):
