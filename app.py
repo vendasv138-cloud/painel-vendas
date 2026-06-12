@@ -667,29 +667,7 @@ def tela_vendedor(nome):
     with aba_hoje:
         meus = df[(df["Vendedor"] == nome) & (df["Data"] == hoje)]
         st.metric("Lançamentos hoje", len(meus))
-        # DEBUG TEMPORÁRIO — remover depois
-        with st.expander("🔍 Diagnóstico (remover depois)", expanded=False):
-            st.write(f"Total linhas lidas da planilha: **{len(df)}**")
-            st.write(f"Data de hoje usada no filtro: **{hoje}**")
-            st.write(f"Vendedor buscado: **{nome}**")
-            st.write(f"Colunas do DataFrame: `{list(df.columns)}`")
-            # Lê valores RAW direto da planilha (ignora cache do DataFrame)
-            try:
-                _sh_diag = abrir_planilha()
-                _ws_diag = _sh_diag.worksheet(ABA_REGISTROS)
-                _raw = _ws_diag.get_all_values()
-                st.write(f"**Linhas RAW na planilha: {len(_raw)}**")
-                if len(_raw) >= 1:
-                    st.write(f"Header RAW: `{_raw[0]}`")
-                if len(_raw) >= 2:
-                    st.write("Últimas 3 linhas RAW:")
-                    st.json(_raw[-3:] if len(_raw) > 3 else _raw[1:])
-            except Exception as e_diag:
-                st.error(f"Erro ao ler RAW: {e_diag}")
-            if not df.empty:
-                st.write("Últimas 3 linhas do DataFrame (colunas Data/Hora/Vendedor):")
-                cols_diag = [c for c in ["Data", "Hora", "Vendedor", "Cliente", "Resultado"] if c in df.columns]
-                st.dataframe(df[cols_diag].tail(3), hide_index=True)
+
         if meus.empty:
             st.info("Nenhum lançamento hoje.")
         else:
