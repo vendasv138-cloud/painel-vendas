@@ -307,6 +307,9 @@ def salvar_registro(vendedor, cliente, cliente_novo, contato,
                     contato_cliente="", recorrente=False, motivo_perda=""):
     sh = abrir_planilha()
     ws = sh.worksheet(ABA_REGISTROS)
+    # Repara o cabeçalho se estiver corrompido (colunas extras/vazias)
+    if ws.row_values(1) != CABECALHO_REGISTROS:
+        ws.update('A1', [CABECALHO_REGISTROS])
     ts = agora()
     preco_kg = round(valor / kg, 2) if kg and valor else 0
     if cliente_novo and cliente.strip().upper() not in {
