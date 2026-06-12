@@ -333,10 +333,6 @@ def salvar_registro(vendedor, cliente, cliente_novo, contato,
         value_input_option="RAW",
     )
     carregar_registros.clear()
-    try:
-        atualizar_abas_analise()
-    except Exception:
-        pass
 
 
 def _atualizar_celula(linha_planilha, nome_col, valor):
@@ -369,20 +365,12 @@ def perder_orcamento(reg, motivo=""):
     if motivo:
         _atualizar_celula(reg["_linha"], "Motivo da Perda", motivo)
     carregar_registros.clear()
-    try:
-        atualizar_abas_analise()
-    except Exception:
-        pass
 
 
 def deletar_registro(linha_planilha):
     sh = abrir_planilha()
     sh.worksheet(ABA_REGISTROS).delete_rows(int(linha_planilha))
     carregar_registros.clear()
-    try:
-        atualizar_abas_analise()
-    except Exception:
-        pass
 
 
 # ----------------------------------------------------------------------------
