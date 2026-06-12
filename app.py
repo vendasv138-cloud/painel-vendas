@@ -443,14 +443,18 @@ def tela_vendedor(nome):
 
     # --- Nova venda ---
     with aba_nova:
-        # Selectbox de carga (acima do cliente)
-        opcoes_carga = ["— Nenhuma carga —"] + list(df_cargas["Carga"])
-        carga_sel = st.selectbox(
-            "🚛 Vincular a uma carga (opcional)",
-            opcoes_carga,
-            key=f"carga_{fv}",
-        )
-        carga_val = "" if carga_sel == "— Nenhuma carga —" else carga_sel
+        # Selectbox de carga (obrigatório)
+        opcoes_carga = list(df_cargas["Carga"]) if not df_cargas.empty else []
+        if opcoes_carga:
+            carga_sel = st.selectbox(
+                "🚛 Carga *",
+                opcoes_carga,
+                key=f"carga_{fv}",
+            )
+            carga_val = carga_sel
+        else:
+            st.warning("Nenhuma carga cadastrada. Peça ao gestor para cadastrar antes de lançar.")
+            carga_val = ""
 
         c1, c2 = st.columns(2)
         cliente     = c1.text_input("Cliente *", key=f"cli_{fv}")
@@ -472,7 +476,9 @@ def tela_vendedor(nome):
             c3.metric("R$/kg (automático)", "R$ " + br(preco))
 
         if st.button("✅ Registrar", type="primary"):
-            if not cliente.strip():
+            if not carga_val:
+                st.error("Selecione a carga antes de registrar.")
+            elif not cliente.strip():
                 st.error("Informe o nome do cliente.")
             elif resultado != "Só contato" and (kg <= 0 or valor <= 0):
                 st.error("Para orçamento ou venda, informe Kg e Valor.")
@@ -662,34 +668,52 @@ def tela_gestor():
         if df_cargas.empty:
             st.info("Nenhuma carga ainda.")
         else:
-            for _, carga in df_cargas.iterrows():
-                realizado = progresso_carga(carga["Carga"], df)
-                meta      = float(carga["Meta (Kg)"]) or 1.0
-                pct       = min(realizado / meta, 1.0)
-                cor       = "🟢" if pct >= 1.0 else ("🟡" if pct >= 0.6 else "🔴")
-                c1, c2 = st.columns([6, 1])
-                c1.markdown(
-                    f"**{carga['Carga']}** — {carga['Data Entrega']} — "
-                    f"{carga['Vendedor']} — Meta: {br(meta)} kg"
+            # Agrupa por nome da carga para mostrar resumo consolidado
+            for nome_carga, grupo in df_cargas.groupby("Carga", sort=False):
+                data_entrega   = grupo["Data Entrega"].iloc[0]
+                vendedores_str = ", ".join(grupo["Vendedor"].tolist())
+                meta_total     = float(grupo["Meta (Kg)"].sum())
+                realiz_total   = sum(
+                    progresso_carga(nome_carga, df)
+                    for _ in [1]  # calcula uma vez para o grupo todo
                 )
-                c1.progress(pct,
-                    text=f"{cor} {br(realizado)} / {br(meta)} kg  ({pct*100:.0f}%)")
-                chave_del  = f"gd_{carga['_linha']}"
-                chave_conf = f"gdc_{carga['_linha']}"
-                if st.session_state.get(chave_conf):
-                    cc1, cc2, cc3 = c2.columns([1, 1, 1]) if False else (c2, c2, c2)
-                    c2.warning("Apagar?")
-                    if c2.button("Sim", key=f"gsim_{carga['_linha']}"):
-                        deletar_carga(carga["_linha"])
-                        st.session_state.pop(chave_conf, None)
-                        st.rerun()
-                    if c2.button("Não", key=f"gnao_{carga['_linha']}"):
-                        st.session_state.pop(chave_conf, None)
-                        st.rerun()
-                else:
-                    if c2.button("🗑️", key=chave_del, help="Apagar carga"):
-                        st.session_state[chave_conf] = True
-                        st.rerun()
+                pct_total = min(realiz_total / meta_total, 1.0) if meta_total else 0.0
+                cor_total = "🟢" if pct_total >= 1.0 else ("🟡" if pct_total >= 0.6 else "🔴")
+
+                # Cabeçalho do grupo
+                st.markdown(
+                    f"### 🚛 {nome_carga} &nbsp;|&nbsp; {data_entrega} &nbsp;|&nbsp; "
+                    f"Vendedores: {vendedores_str} &nbsp;|&nbsp; Total meta: **{br(meta_total)} kg**"
+                )
+                st.progress(
+                    pct_total,
+                    text=f"{cor_total} Total realizado: {br(realiz_total)} / {br(meta_total)} kg  ({pct_total*100:.0f}%)"
+                )
+
+                # Detalhamento por vendedor
+                for _, carga in grupo.iterrows():
+                    realizado = progresso_carga(carga["Carga"], df)
+                    meta      = float(carga["Meta (Kg)"]) or 1.0
+                    pct       = min(realizado / meta, 1.0)
+                    cor       = "🟢" if pct >= 1.0 else ("🟡" if pct >= 0.6 else "🔴")
+                    c1, c2    = st.columns([6, 1])
+                    c1.markdown(f"↳ **{carga['Vendedor']}** — Meta individual: {br(meta)} kg")
+                    c1.progress(pct, text=f"{cor} {br(realizado)} / {br(meta)} kg  ({pct*100:.0f}%)")
+                    chave_del  = f"gd_{carga['_linha']}"
+                    chave_conf = f"gdc_{carga['_linha']}"
+                    if st.session_state.get(chave_conf):
+                        c2.warning("Apagar?")
+                        if c2.button("Sim", key=f"gsim_{carga['_linha']}"):
+                            deletar_carga(carga["_linha"])
+                            st.session_state.pop(chave_conf, None)
+                            st.rerun()
+                        if c2.button("Não", key=f"gnao_{carga['_linha']}"):
+                            st.session_state.pop(chave_conf, None)
+                            st.rerun()
+                    else:
+                        if c2.button("🗑️", key=chave_del, help="Apagar"):
+                            st.session_state[chave_conf] = True
+                            st.rerun()
                 st.divider()
 
     with aba_funil:
