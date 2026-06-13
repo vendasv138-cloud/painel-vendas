@@ -566,8 +566,6 @@ def tela_vendedor(nome):
 
         c1, c2 = st.columns(2)
         cliente          = c1.text_input("Cliente *", key=f"cli_{fv}")
-        contato_cliente  = c1.text_input("Contato do cliente (WhatsApp/Email)",
-                                          placeholder="Opcional", key=f"ctcli_{fv}")
         tipo             = c1.radio("Tipo de cliente *", ["Carteira", "Novo"],
                                     horizontal=True, key=f"tipo_{fv}")
         cliente_novo     = tipo == "Novo"
@@ -597,7 +595,6 @@ def tela_vendedor(nome):
                 salvar_registro(
                     nome, cliente, cliente_novo, contato,
                     resultado, kg, valor, carga_val,
-                    contato_cliente=contato_cliente,
                     recorrente=recorrente,
                 )
                 msg = "Lançamento registrado!"
@@ -657,11 +654,9 @@ def tela_vendedor(nome):
                         st.rerun()
                     if cm3.button("Cancelar", key=f"canc_perd_{reg['_linha']}"):
                         st.session_state.pop(chave_perd, None)
-                        st.rerun()
                 else:
                     if c3.button("❌ Perdido", key=f"pd{reg['_linha']}"):
                         st.session_state[chave_perd] = True
-                        st.rerun()
 
     # --- Meus lançamentos de hoje ---
     with aba_hoje:
