@@ -403,7 +403,9 @@ def resumir(df):
                     if "Cliente Recorrente?" in g.columns else pd.DataFrame())
         kg  = vendas["Kg"].sum()
         rs  = vendas["Valor (R$)"].sum()
-        dec_conv  = len(vendas) + len(orcs)
+        # Orçamentos aprovados já viraram venda — excluir do denominador para não duplicar
+        orcs_pendentes = orcs[orcs["Situação"] != SITUACAO_APROVADO] if "Situação" in orcs.columns else orcs
+        dec_conv  = len(vendas) + len(orcs_pendentes)
         dec_perda = len(vendas) + len(perdidos)
         conv  = 100 * len(vendas) / dec_conv  if dec_conv  > 0 else 0.0
         perda = 100 * len(perdidos) / dec_perda if dec_perda > 0 else 0.0
@@ -428,7 +430,8 @@ def _kpis(df):
                 if "Cliente Recorrente?" in df.columns else pd.DataFrame())
     kg  = vendas["Kg"].sum()
     rs  = vendas["Valor (R$)"].sum()
-    dec_conv  = len(vendas) + len(orcs)
+    orcs_pendentes = orcs[orcs["Situação"] != SITUACAO_APROVADO] if "Situação" in orcs.columns else orcs
+    dec_conv  = len(vendas) + len(orcs_pendentes)
     dec_perda = len(vendas) + len(perdidos)
     return {
         "n_vendas":   len(vendas),
