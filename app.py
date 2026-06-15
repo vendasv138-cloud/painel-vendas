@@ -1047,7 +1047,8 @@ def tela_gestor():
             dados = dados[dados["Vendedor"].isin(f_vend)]
         if f_res:
             dados = dados[dados["Resultado"].isin(f_res)]
-        colunas_exibir = [c for c in CABECALHO_REGISTROS if c in dados.columns]
+        _ocultar = {"Contato do Cliente", "Cliente Recorrente?"}
+        colunas_exibir = [c for c in CABECALHO_REGISTROS if c in dados.columns and c not in _ocultar]
         st.dataframe(dados[colunas_exibir], hide_index=True, use_container_width=True)
         st.download_button(
             "⬇️ Baixar CSV",
