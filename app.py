@@ -7,6 +7,8 @@ Banco de dados: Google Sheets (no Google Drive)
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import io
+
 import pandas as pd
 import streamlit as st
 import gspread
@@ -386,7 +388,7 @@ def deletar_registro(linha_planilha):
 COLUNAS_RESUMO = [
     "Vendedor", "Lançamentos", "Clientes novos", "Orçamentos",
     "Vendas", "Kg vendido", "R$ vendido", "R$/kg médio",
-    "Conversão (%)", "Taxa Perda (%)", "Recorrentes (%)",
+    "Conversão (%)", "Taxa Perda (%)", "Recorrentes (%)", "Score",
 ]
 
 
@@ -410,11 +412,12 @@ def resumir(df):
         conv  = 100 * len(vendas) / dec_conv  if dec_conv  > 0 else 0.0
         perda = 100 * len(perdidos) / dec_perda if dec_perda > 0 else 0.0
         recorr_pct = 100 * len(recorr) / len(g) if len(g) > 0 else 0.0
+        score = round(conv * 0.5 + max(100 - perda, 0) * 0.3 + recorr_pct * 0.2, 1)
         linhas.append([
             vend, len(g), len(novos), len(orcs), len(vendas),
             round(kg, 2), round(rs, 2),
             round(rs / kg, 2) if kg else 0.0,
-            round(conv, 1), round(perda, 1), round(recorr_pct, 1),
+            round(conv, 1), round(perda, 1), round(recorr_pct, 1), score,
         ])
     out = pd.DataFrame(linhas, columns=COLUNAS_RESUMO)
     return out.sort_values(["Kg vendido", "R$ vendido", "Lançamentos"],
@@ -472,6 +475,42 @@ def atualizar_abas_analise():
 
 
 # ----------------------------------------------------------------------------
+# Inteligência de cargas
+# ----------------------------------------------------------------------------
+def _intel_carga(data_entrega_str, meta_kg, realizado_kg, df_registros, carga_nome, vendedor=None):
+    """Retorna (dias_restantes, forecast_dias, is_overdue, pace_kg_dia)."""
+    try:
+        data_ent = datetime.strptime(data_entrega_str.strip(), "%d/%m/%Y").date()
+    except (ValueError, AttributeError):
+        return None, None, False, 0.0
+    hoje = agora().date()
+    dias_rest = (data_ent - hoje).days
+    is_overdue = dias_rest < 0 and realizado_kg < meta_kg
+    faltam = max(meta_kg - realizado_kg, 0.0)
+    mask = (
+        (df_registros["Carga"] == carga_nome) &
+        (df_registros["Resultado"] == "Venda fechada") &
+        df_registros["_data"].notna()
+    )
+    if vendedor:
+        mask &= (df_registros["Vendedor"] == vendedor)
+    vendas_c = df_registros[mask]
+    if not vendas_c.empty:
+        data_ini = vendas_c["_data"].min().date()
+        dias_ativos = max((hoje - data_ini).days, 1)
+        pace = realizado_kg / dias_ativos
+    else:
+        pace = 0.0
+    if pace > 0 and faltam > 0:
+        forecast = int(faltam / pace)
+    elif faltam == 0:
+        forecast = 0
+    else:
+        forecast = None
+    return dias_rest, forecast, is_overdue, pace
+
+
+# ----------------------------------------------------------------------------
 # Componentes de tela
 # ----------------------------------------------------------------------------
 def tabela_ranking(res, destaque=None):
@@ -486,6 +525,7 @@ def tabela_ranking(res, destaque=None):
     res["Conversão (%)"]   = res["Conversão (%)"].map(lambda v: f"{v:.1f}%")
     res["Taxa Perda (%)"]  = res["Taxa Perda (%)"].map(lambda v: f"{v:.1f}%")
     res["Recorrentes (%)"] = res["Recorrentes (%)"].map(lambda v: f"{v:.1f}%")
+    res["Score"]           = res["Score"].map(lambda v: f"{v:.1f}")
     st.dataframe(res, hide_index=True, use_container_width=True)
     if destaque is not None and destaque in res["Vendedor"].values:
         pos = res.loc[res["Vendedor"] == destaque, "Posição"].iloc[0]
@@ -503,11 +543,25 @@ def widget_cargas(df_cargas, df_registros, filtro_vendedor=None):
         meta      = float(carga["Meta (Kg)"]) or 1.0
         pct       = min(realizado / meta, 1.0)
         cor       = "🟢" if pct >= 1.0 else ("🟡" if pct >= 0.6 else "🔴")
-        st.markdown(
-            f"**{carga['Carga']}** — {carga['Data Entrega']} — "
-            f"{carga['Vendedor']} — Meta: {br(meta)} kg"
+        dias_rest, forecast, is_overdue, pace = _intel_carga(
+            carga["Data Entrega"], meta, realizado, df_registros,
+            carga["Carga"], vendedor=carga["Vendedor"]
         )
+        titulo = f"**{carga['Carga']}** — {carga['Data Entrega']} — Meta: {br(meta)} kg"
+        if is_overdue:
+            st.error(f"🚨 {titulo} *(prazo vencido!)*")
+        else:
+            st.markdown(titulo)
         st.progress(pct, text=f"{cor} {br(realizado)} / {br(meta)} kg  ({pct*100:.0f}%)")
+        if dias_rest is not None and pct < 1.0:
+            if is_overdue:
+                st.caption(f"⛔ Prazo vencido há {abs(dias_rest)} dia(s). Faltam {br(meta - realizado)} kg.")
+            elif forecast is None:
+                st.caption(f"⏳ {dias_rest} dia(s) até entrega — sem histórico para previsão.")
+            elif forecast <= dias_rest:
+                st.caption(f"✅ No ritmo atual ({br(pace)} kg/dia), fecha em ~{forecast} dia(s). Prazo: {dias_rest} dia(s).")
+            else:
+                st.caption(f"⚠️ Ritmo atual ({br(pace)} kg/dia) prevê fechamento em {forecast} dia(s), mas prazo é {dias_rest} dia(s).")
         st.divider()
 
 
@@ -567,12 +621,15 @@ def tela_vendedor(nome):
             st.warning("Nenhuma carga cadastrada. Peça ao gestor para cadastrar antes de lançar.")
             carga_val = ""
 
-        c1, c2 = st.columns(2)
-        cliente          = c1.text_input("Cliente *", key=f"cli_{fv}")
-        tipo             = c1.radio("Tipo de cliente *", ["Carteira", "Novo"],
-                                    horizontal=True, key=f"tipo_{fv}")
-        cliente_novo     = tipo == "Novo"
-        contato          = c2.text_input("Com quem falou", key=f"cont_{fv}")
+        cliente = st.text_input("Cliente *", key=f"cli_{fv}")
+        _clientes_set = set(c.upper() for c in carregar_clientes())
+        if cliente.strip():
+            cliente_novo = cliente.strip().upper() not in _clientes_set
+            st.caption("🆕 Cliente novo" if cliente_novo else "🔄 Cliente de carteira")
+        else:
+            cliente_novo = False
+        with st.expander("Com quem falou / detalhes"):
+            contato = st.text_input("Com quem falou", key=f"cont_{fv}")
         resultado        = st.radio("Resultado do contato *", RESULTADOS,
                                     horizontal=True, key=f"res_{fv}")
 
@@ -774,6 +831,22 @@ def tela_gestor():
         c3b.metric("Recorrência",           f"{kpis['recorr_pct']:.0f}%")
         c4b.metric("Orçamentos vencidos +5d", n_vencidos)
 
+        n_vend = len(carregar_vendedores()) or 1
+        contatos_vend = len(df_hoje) / n_vend
+        tempo_medio_df = pd.to_numeric(
+            df.loc[(df["Resultado"] == "Orçamento enviado") & (df["Situação"] == SITUACAO_APROVADO),
+                   "Tempo até Resposta (dias)"], errors="coerce"
+        )
+        tempo_medio = tempo_medio_df.mean()
+        novos_pct = 100 * int((df_hoje["Tipo cliente"] == "Novo").sum()) / len(df_hoje) if len(df_hoje) else 0
+
+        c1c, c2c, c3c = st.columns(3)
+        c1c.metric("Contatos/vendedor hoje", f"{contatos_vend:.1f}",
+                   delta="meta >2,5", delta_color="off")
+        c2c.metric("Tempo médio aprovação",
+                   f"{tempo_medio:.0f} dias" if pd.notna(tempo_medio) else "—")
+        c3c.metric("Mix hoje (novos)", f"{novos_pct:.0f}%")
+
         if n_vencidos > 0:
             st.warning(f"⚠️ {n_vencidos} orçamento(s) sem resposta há mais de 5 dias — veja a aba Orçamentos.")
 
@@ -933,6 +1006,20 @@ def tela_gestor():
                         if c2.button("🗑️", key=chave_del, help="Apagar"):
                             st.session_state[chave_conf] = True
                             st.rerun()
+                # Redistribuição sugerida (quando há múltiplos vendedores na carga)
+                if len(grupo) > 1:
+                    pcts_vend = []
+                    for _, c in grupo.iterrows():
+                        r = progresso_carga(c["Carga"], df, vendedor=c["Vendedor"])
+                        m = float(c["Meta (Kg)"]) or 1.0
+                        pcts_vend.append((c["Vendedor"], r / m * 100))
+                    melhor = max(pcts_vend, key=lambda x: x[1])
+                    pior   = min(pcts_vend, key=lambda x: x[1])
+                    if melhor[1] - pior[1] > 30:
+                        st.info(
+                            f"💡 {melhor[0]} está em {melhor[1]:.0f}% e "
+                            f"{pior[0]} em {pior[1]:.0f}% — considerar redistribuição?"
+                        )
                 st.divider()
 
     # --- Funil ---
@@ -1050,11 +1137,21 @@ def tela_gestor():
         _ocultar = {"Contato do Cliente", "Cliente Recorrente?"}
         colunas_exibir = [c for c in CABECALHO_REGISTROS if c in dados.columns and c not in _ocultar]
         st.dataframe(dados[colunas_exibir], hide_index=True, use_container_width=True)
-        st.download_button(
+        c_dl1, c_dl2 = st.columns(2)
+        c_dl1.download_button(
             "⬇️ Baixar CSV",
             dados[colunas_exibir].to_csv(index=False, sep=";",
                                           decimal=",").encode("utf-8-sig"),
             file_name=f"vendas_{agora().strftime('%Y%m%d')}.csv",
+        )
+        _buf = io.BytesIO()
+        with pd.ExcelWriter(_buf, engine="openpyxl") as _w:
+            dados[colunas_exibir].to_excel(_w, index=False, sheet_name="Registros")
+        c_dl2.download_button(
+            "⬇️ Baixar Excel",
+            _buf.getvalue(),
+            file_name=f"vendas_{agora().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
         if st.button("🔄 Atualizar abas de análise na planilha"):
             atualizar_abas_analise()
