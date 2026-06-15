@@ -569,7 +569,6 @@ def tela_vendedor(nome):
         tipo             = c1.radio("Tipo de cliente *", ["Carteira", "Novo"],
                                     horizontal=True, key=f"tipo_{fv}")
         cliente_novo     = tipo == "Novo"
-        recorrente       = c1.checkbox("Cliente já comprou antes?", key=f"recorr_{fv}")
         contato          = c2.text_input("Com quem falou", key=f"cont_{fv}")
         resultado        = st.radio("Resultado do contato *", RESULTADOS,
                                     horizontal=True, key=f"res_{fv}")
@@ -595,7 +594,6 @@ def tela_vendedor(nome):
                 salvar_registro(
                     nome, cliente, cliente_novo, contato,
                     resultado, kg, valor, carga_val,
-                    recorrente=recorrente,
                 )
                 msg = "Lançamento registrado!"
                 if cliente_novo:
