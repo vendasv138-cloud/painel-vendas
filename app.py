@@ -623,11 +623,14 @@ def tela_vendedor(nome):
 
         cliente = st.text_input("Cliente *", key=f"cli_{fv}")
         _clientes_set = set(c.upper() for c in carregar_clientes())
-        if cliente.strip():
-            cliente_novo = cliente.strip().upper() not in _clientes_set
-            st.caption("🆕 Cliente novo" if cliente_novo else "🔄 Cliente de carteira")
-        else:
-            cliente_novo = False
+        _sugerido = "Carteira" if cliente.strip().upper() in _clientes_set and cliente.strip() else "Novo"
+        tipo = st.radio(
+            "Tipo de cliente *",
+            ["Carteira", "Novo"],
+            index=["Carteira", "Novo"].index(_sugerido),
+            horizontal=True, key=f"tipo_{fv}",
+        )
+        cliente_novo = tipo == "Novo"
         with st.expander("Com quem falou / detalhes"):
             contato = st.text_input("Com quem falou", key=f"cont_{fv}")
         resultado        = st.radio("Resultado do contato *", RESULTADOS,
