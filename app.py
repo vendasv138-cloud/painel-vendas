@@ -1089,6 +1089,21 @@ def tela_gestor():
                     else:
                         c2.button("🗑️", key=chave_del, help="Apagar",
                                   on_click=_cb_abrir_del_carga, args=(chave_conf,))
+                # Vendedores que venderam nesta carga sem estarem atribuídos a ela
+                vendedores_atribuidos = set(grupo["Vendedor"].tolist())
+                vendas_carga_total = df[
+                    (df["Carga"] == nome_carga) &
+                    (df["Resultado"] == "Venda fechada")
+                ]
+                outros_vend = vendas_carga_total[
+                    ~vendas_carga_total["Vendedor"].isin(vendedores_atribuidos)
+                ]
+                if not outros_vend.empty:
+                    st.caption("Vendas de outros vendedores nesta carga (sem meta individual):")
+                    for vend_outro, g in outros_vend.groupby("Vendedor"):
+                        kg_outro = float(g["Kg"].sum())
+                        st.markdown(f"↳ **{vend_outro}** (sem meta) — {br(kg_outro)} kg vendido")
+
                 # Redistribuição sugerida (quando há múltiplos vendedores na carga)
                 if len(grupo) > 1:
                     pcts_vend = []
