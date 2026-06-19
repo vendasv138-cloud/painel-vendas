@@ -601,10 +601,13 @@ def tela_vendedor(nome):
     if "flash" in st.session_state:
         st.success(st.session_state.pop("flash"))
 
-    aba_nova, aba_orc, aba_hoje, aba_cargas, aba_rank = st.tabs(
-        ["➕ Nova venda", "📄 Orçamentos em aberto",
-         "📋 Meus lançamentos de hoje", "🚛 Cargas", "🏆 Ranking"]
-    )
+    OPCOES_VEND = ["➕ Nova venda", "📄 Orçamentos em aberto",
+                   "📋 Meus lançamentos de hoje", "🚛 Cargas", "🏆 Ranking"]
+    if "vend_aba" not in st.session_state:
+        st.session_state["vend_aba"] = OPCOES_VEND[0]
+    aba_atual = st.radio("Navegação", OPCOES_VEND, horizontal=True,
+                         key="vend_aba", label_visibility="collapsed")
+    st.divider()
 
     df        = carregar_registros()
     df_cargas = carregar_cargas()
@@ -613,7 +616,7 @@ def tela_vendedor(nome):
     fv        = st.session_state.get("form_ver", 0)
 
     # --- Nova venda ---
-    with aba_nova:
+    if aba_atual == "➕ Nova venda":
         opcoes_carga = list(df_cargas["Carga"].unique()) if not df_cargas.empty else []
         if opcoes_carga:
             carga_val = st.selectbox("🚛 Carga *", opcoes_carga, key=f"carga_{fv}")
@@ -667,7 +670,7 @@ def tela_vendedor(nome):
                 st.rerun()
 
     # --- Orçamentos em aberto ---
-    with aba_orc:
+    elif aba_atual == "📄 Orçamentos em aberto":
         abertos = df[
             (df["Vendedor"].astype(str).str.strip() == nome) &
             (df["Resultado"].astype(str).str.strip() == "Orçamento enviado") &
@@ -715,12 +718,14 @@ def tela_vendedor(nome):
                         st.rerun()
                     if cm3.button("Cancelar", key=f"canc_perd_{reg['_linha']}"):
                         st.session_state.pop(chave_perd, None)
+                        st.rerun()
                 else:
                     if c3.button("❌ Perdido", key=f"pd{reg['_linha']}"):
                         st.session_state[chave_perd] = True
+                        st.rerun()
 
     # --- Meus lançamentos de hoje ---
-    with aba_hoje:
+    elif aba_atual == "📋 Meus lançamentos de hoje":
         meus = df[(df["Vendedor"] == nome) & (df["Data"] == hoje)]
         st.metric("Lançamentos hoje", len(meus))
 
@@ -753,7 +758,7 @@ def tela_vendedor(nome):
                         st.rerun()
 
     # --- Cargas do vendedor ---
-    with aba_cargas:
+    elif aba_atual == "🚛 Cargas":
         minhas_cargas = df_cargas[df_cargas["Vendedor"] == nome]
 
         # Seção 1: cargas atribuídas com meta
@@ -783,7 +788,7 @@ def tela_vendedor(nome):
                 st.divider()
 
     # --- Ranking ---
-    with aba_rank:
+    elif aba_atual == "🏆 Ranking":
         st.subheader(f"Hoje ({hoje})")
         tabela_ranking(resumir(df[df["Data"] == hoje]), destaque=nome)
         st.subheader(f"Mês ({mes})")
@@ -811,13 +816,16 @@ def tela_gestor():
                                errors="coerce")
     n_vencidos = int((dias_num > 5).sum())
 
-    aba_dia, aba_mes, aba_orc, aba_cargas, aba_funil, aba_perdas, aba_dados = st.tabs(
-        ["📅 Hoje", "📈 Mês", "💰 Orçamentos", "🚛 Cargas",
-         "🔻 Funil", "📊 Análise de Perdas", "🗂 Dados completos"]
-    )
+    OPCOES_GESTOR = ["📅 Hoje", "📈 Mês", "💰 Orçamentos", "🚛 Cargas",
+                      "🔻 Funil", "📊 Análise de Perdas", "🗂 Dados completos"]
+    if "gestor_aba" not in st.session_state:
+        st.session_state["gestor_aba"] = OPCOES_GESTOR[0]
+    aba_atual = st.radio("Navegação", OPCOES_GESTOR, horizontal=True,
+                         key="gestor_aba", label_visibility="collapsed")
+    st.divider()
 
     # --- Hoje ---
-    with aba_dia:
+    if aba_atual == "📅 Hoje":
         kpis = _kpis(df_hoje)
         c1, c2, c3, c4, c5, c6 = st.columns(6)
         c1.metric("Lançamentos",     len(df_hoje))
@@ -861,7 +869,7 @@ def tela_gestor():
         tabela_ranking(resumir(df_hoje))
 
     # --- Mês ---
-    with aba_mes:
+    elif aba_atual == "📈 Mês":
         kpis = _kpis(df_mes)
         vendas_mes = df_mes[df_mes["Resultado"] == "Venda fechada"]
         c1, c2, c3, c4, c5, c6 = st.columns(6)
@@ -886,7 +894,7 @@ def tela_gestor():
             st.bar_chart(por_dia.sort_index())
 
     # --- Orçamentos ---
-    with aba_orc:
+    elif aba_atual == "💰 Orçamentos":
         orc     = df[df["Resultado"] == "Orçamento enviado"]
         abertos = orc[orc["Situação"] == SITUACAO_ABERTO]
         aprov   = orc[orc["Situação"] == SITUACAO_APROVADO]
@@ -946,7 +954,7 @@ def tela_gestor():
             st.dataframe(perd_show, hide_index=True, use_container_width=True)
 
     # --- Cargas ---
-    with aba_cargas:
+    elif aba_atual == "🚛 Cargas":
         st.subheader("Cadastrar nova carga")
         vendedores_lista = list(carregar_vendedores().keys())
         with st.form("form_nova_carga", clear_on_submit=True):
@@ -1026,7 +1034,7 @@ def tela_gestor():
                 st.divider()
 
     # --- Funil ---
-    with aba_funil:
+    elif aba_atual == "🔻 Funil":
         st.caption("Contatos → Orçamentos → Vendas (mês atual)")
         res = resumir(df_mes)
         if res.empty:
@@ -1038,7 +1046,7 @@ def tela_gestor():
             st.bar_chart(res.set_index("Vendedor")[["Lançamentos", "Orçamentos", "Vendas"]])
 
     # --- Análise de Perdas ---
-    with aba_perdas:
+    elif aba_atual == "📊 Análise de Perdas":
         st.subheader("Análise de Perdas")
         perdidos_df = df[df["Situação"] == SITUACAO_PERDIDO].copy()
 
@@ -1125,7 +1133,7 @@ def tela_gestor():
                     st.info(f"💡 Recomendação: {rec}")
 
     # --- Dados completos ---
-    with aba_dados:
+    elif aba_atual == "🗂 Dados completos":
         c1, c2 = st.columns(2)
         f_vend = c1.multiselect(
             "Vendedor",
