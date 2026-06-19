@@ -639,20 +639,20 @@ def tela_vendedor(nome):
         kg = valor = 0.0
         if resultado != "Só contato":
             c1, c2, c3 = st.columns(3)
-            kg    = c1.number_input("Kg *", min_value=0.0, step=10.0,
-                                    format="%.2f", key=f"kg_{fv}")
-            valor = c2.number_input("Valor total (R$) *", min_value=0.0,
-                                    step=100.0, format="%.2f", key=f"val_{fv}")
-            preco = valor / kg if kg else 0
-            c3.metric("R$/kg (automático)", "R$ " + br(preco))
+            kg       = c1.number_input("Kg *", min_value=0.0, step=10.0,
+                                       format="%.2f", key=f"kg_{fv}")
+            preco_kg = c2.number_input("R$/kg *", min_value=0.0,
+                                       step=0.5, format="%.2f", key=f"preco_{fv}")
+            valor    = round(kg * preco_kg, 2)
+            c3.metric("Valor total (automático)", "R$ " + br(valor))
 
         if st.button("✅ Registrar", type="primary"):
             if not carga_val:
                 st.error("Selecione a carga antes de registrar.")
             elif not cliente.strip():
                 st.error("Informe o nome do cliente.")
-            elif resultado != "Só contato" and (kg <= 0 or valor <= 0):
-                st.error("Para orçamento ou venda, informe Kg e Valor.")
+            elif resultado != "Só contato" and (kg <= 0 or preco_kg <= 0):
+                st.error("Para orçamento ou venda, informe Kg e R$/kg.")
             else:
                 salvar_registro(
                     nome, cliente, cliente_novo, contato,
