@@ -60,7 +60,10 @@ VENDEDORES_INICIAIS = [
     ["RENATA",    "7070", "SIM"],
 ]
 
-st.set_page_config(page_title="Painel de Vendas", page_icon="📊", layout="wide")
+st.set_page_config(
+    page_title="Painel de Vendas", page_icon="📊", layout="wide",
+    initial_sidebar_state="collapsed" if st.session_state.get("usuario") else "auto",
+)
 
 
 # ----------------------------------------------------------------------------
