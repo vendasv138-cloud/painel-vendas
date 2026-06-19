@@ -568,6 +568,19 @@ def widget_cargas(df_cargas, df_registros, filtro_vendedor=None):
 # ----------------------------------------------------------------------------
 # Tela Login
 # ----------------------------------------------------------------------------
+def _cb_login(nome, senha, vendedores):
+    ok = (
+        senha == st.secrets["app"]["senha_gestor"]
+        if nome == "GESTOR"
+        else senha == vendedores.get(nome, "")
+    )
+    if ok and senha:
+        st.session_state["usuario"] = nome
+        st.session_state.pop("login_erro", None)
+    else:
+        st.session_state["login_erro"] = "PIN/senha incorreto. Tente novamente."
+
+
 def tela_login():
     st.title("📊 Painel de Vendas")
     vendedores = carregar_vendedores()
@@ -580,17 +593,65 @@ def tela_login():
             "Senha" if nome == "GESTOR" else "PIN",
             type="password", max_chars=20,
         )
-        if st.button("Entrar", type="primary", use_container_width=True):
-            ok = (
-                senha == st.secrets["app"]["senha_gestor"]
-                if nome == "GESTOR"
-                else senha == vendedores.get(nome, "")
-            )
-            if ok and senha:
-                st.session_state["usuario"] = nome
-                st.rerun()
-            else:
-                st.error("PIN/senha incorreto. Tente novamente.")
+        st.button("Entrar", type="primary", use_container_width=True,
+                  on_click=_cb_login, args=(nome, senha, vendedores))
+        if st.session_state.get("login_erro"):
+            st.error(st.session_state.pop("login_erro"))
+
+
+# ----------------------------------------------------------------------------
+# Tela Vendedor — callbacks
+# ----------------------------------------------------------------------------
+def _cb_registrar(nome, cliente, cliente_novo, contato, resultado, kg, preco_kg, valor, carga_val, fv):
+    if not carga_val:
+        st.session_state["form_erro"] = "Selecione a carga antes de registrar."
+    elif not cliente.strip():
+        st.session_state["form_erro"] = "Informe o nome do cliente."
+    elif resultado != "Só contato" and (kg <= 0 or preco_kg <= 0):
+        st.session_state["form_erro"] = "Para orçamento ou venda, informe Kg e R$/kg."
+    else:
+        salvar_registro(nome, cliente, cliente_novo, contato, resultado, kg, valor, carga_val)
+        msg = "Lançamento registrado!"
+        if cliente_novo:
+            msg += f" Cliente novo '{cliente.strip()}' cadastrado."
+        st.session_state["flash"] = msg + " Data e hora gravadas automaticamente."
+        st.session_state["form_ver"] = fv + 1
+        st.session_state["mostrar_balloons"] = True
+        st.session_state.pop("form_erro", None)
+
+
+def _cb_aprovar(reg):
+    aprovar_orcamento(reg)
+    st.session_state["flash"] = f"Orçamento de {reg['Cliente']} convertido em venda fechada!"
+
+
+def _cb_abrir_perdido(chave):
+    st.session_state[chave] = True
+
+
+def _cb_confirmar_perda(reg, chave, motivo_sel, detalhe_outro=""):
+    motivo_final = detalhe_outro.strip() if motivo_sel == "Outro" else motivo_sel
+    perder_orcamento(reg, motivo=motivo_final)
+    st.session_state.pop(chave, None)
+    st.session_state["flash"] = f"Orçamento de {reg['Cliente']} marcado como perdido."
+
+
+def _cb_cancelar_perda(chave):
+    st.session_state.pop(chave, None)
+
+
+def _cb_abrir_apagar(chave):
+    st.session_state[chave] = True
+
+
+def _cb_confirmar_apagar(linha, chave):
+    deletar_registro(linha)
+    st.session_state.pop(chave, None)
+    st.session_state["flash"] = "Lançamento apagado."
+
+
+def _cb_cancelar_apagar(chave):
+    st.session_state.pop(chave, None)
 
 
 # ----------------------------------------------------------------------------
@@ -600,6 +661,8 @@ def tela_vendedor(nome):
     st.title(f"Olá, {nome.title()}!")
     if "flash" in st.session_state:
         st.success(st.session_state.pop("flash"))
+    if st.session_state.pop("mostrar_balloons", False):
+        st.balloons()
 
     OPCOES_VEND = ["➕ Nova venda", "📄 Orçamentos em aberto",
                    "📋 Meus lançamentos de hoje", "🚛 Cargas", "🏆 Ranking"]
@@ -639,7 +702,7 @@ def tela_vendedor(nome):
         resultado        = st.radio("Resultado do contato *", RESULTADOS,
                                     horizontal=True, key=f"res_{fv}")
 
-        kg = valor = 0.0
+        kg = preco_kg = valor = 0.0
         if resultado != "Só contato":
             c1, c2, c3 = st.columns(3)
             kg       = c1.number_input("Kg *", min_value=0.0, step=10.0,
@@ -649,25 +712,13 @@ def tela_vendedor(nome):
             valor    = round(kg * preco_kg, 2)
             c3.metric("Valor total (automático)", "R$ " + br(valor))
 
-        if st.button("✅ Registrar", type="primary"):
-            if not carga_val:
-                st.error("Selecione a carga antes de registrar.")
-            elif not cliente.strip():
-                st.error("Informe o nome do cliente.")
-            elif resultado != "Só contato" and (kg <= 0 or preco_kg <= 0):
-                st.error("Para orçamento ou venda, informe Kg e R$/kg.")
-            else:
-                salvar_registro(
-                    nome, cliente, cliente_novo, contato,
-                    resultado, kg, valor, carga_val,
-                )
-                msg = "Lançamento registrado!"
-                if cliente_novo:
-                    msg += f" Cliente novo '{cliente.strip()}' cadastrado."
-                st.session_state["flash"] = msg + " Data e hora gravadas automaticamente."
-                st.session_state["form_ver"] = fv + 1
-                st.balloons()
-                st.rerun()
+        st.button(
+            "✅ Registrar", type="primary",
+            on_click=_cb_registrar,
+            args=(nome, cliente, cliente_novo, contato, resultado, kg, preco_kg, valor, carga_val, fv),
+        )
+        if st.session_state.get("form_erro"):
+            st.error(st.session_state.pop("form_erro"))
 
     # --- Orçamentos em aberto ---
     elif aba_atual == "📄 Orçamentos em aberto":
@@ -694,35 +745,35 @@ def tela_vendedor(nome):
                     f"**{reg['Cliente']}** — {reg['Data']} — "
                     f"{br(reg['Kg'])} kg — R$ {br(reg['Valor (R$)'])}{dias_str}"
                 )
-                if c2.button("✅ Aprovou", key=f"ap{reg['_linha']}"):
-                    aprovar_orcamento(reg)
-                    st.session_state["flash"] = (
-                        f"Orçamento de {reg['Cliente']} convertido em venda fechada!")
-                    st.rerun()
+                c2.button("✅ Aprovou", key=f"ap{reg['_linha']}",
+                          on_click=_cb_aprovar, args=(reg,))
 
                 # Perdido: abre dropdown de motivo antes de confirmar
                 chave_perd = f"perd_motivo_{reg['_linha']}"
                 if st.session_state.get(chave_perd):
                     cm1, cm2, cm3 = st.columns([3, 1, 1])
                     motivo_sel = cm1.selectbox(
-                        "Motivo da perda (opcional)",
-                        ["— Não informado —"] + MOTIVOS_PERDA,
+                        "Motivo da perda *",
+                        ["Selecione..."] + MOTIVOS_PERDA,
                         key=f"mot_{reg['_linha']}",
                     )
-                    if cm2.button("Confirmar", key=f"conf_perd_{reg['_linha']}", type="primary"):
-                        motivo_final = "" if motivo_sel == "— Não informado —" else motivo_sel
-                        perder_orcamento(reg, motivo=motivo_final)
-                        st.session_state.pop(chave_perd, None)
-                        st.session_state["flash"] = (
-                            f"Orçamento de {reg['Cliente']} marcado como perdido.")
-                        st.rerun()
-                    if cm3.button("Cancelar", key=f"canc_perd_{reg['_linha']}"):
-                        st.session_state.pop(chave_perd, None)
-                        st.rerun()
+                    detalhe_outro = ""
+                    if motivo_sel == "Outro":
+                        detalhe_outro = cm1.text_input(
+                            "Detalhe o motivo *", key=f"motdet_{reg['_linha']}"
+                        )
+                    motivo_valido = motivo_sel != "Selecione..." and (
+                        motivo_sel != "Outro" or detalhe_outro.strip()
+                    )
+                    cm2.button("Confirmar", key=f"conf_perd_{reg['_linha']}", type="primary",
+                               disabled=not motivo_valido,
+                               on_click=_cb_confirmar_perda,
+                               args=(reg, chave_perd, motivo_sel, detalhe_outro))
+                    cm3.button("Cancelar", key=f"canc_perd_{reg['_linha']}",
+                               on_click=_cb_cancelar_perda, args=(chave_perd,))
                 else:
-                    if c3.button("❌ Perdido", key=f"pd{reg['_linha']}"):
-                        st.session_state[chave_perd] = True
-                        st.rerun()
+                    c3.button("❌ Perdido", key=f"pd{reg['_linha']}",
+                              on_click=_cb_abrir_perdido, args=(chave_perd,))
 
     # --- Meus lançamentos de hoje ---
     elif aba_atual == "📋 Meus lançamentos de hoje":
@@ -744,18 +795,13 @@ def tela_vendedor(nome):
                 if st.session_state.get(chave_conf):
                     cc1, cc2, cc3 = st.columns([3, 1, 1])
                     cc1.warning("Confirma exclusão deste lançamento?")
-                    if cc2.button("Sim, apagar", key=f"sim_{reg['_linha']}", type="primary"):
-                        deletar_registro(reg["_linha"])
-                        st.session_state.pop(chave_conf, None)
-                        st.session_state["flash"] = "Lançamento apagado."
-                        st.rerun()
-                    if cc3.button("Cancelar", key=f"nao_{reg['_linha']}"):
-                        st.session_state.pop(chave_conf, None)
-                        st.rerun()
+                    cc2.button("Sim, apagar", key=f"sim_{reg['_linha']}", type="primary",
+                               on_click=_cb_confirmar_apagar, args=(reg["_linha"], chave_conf))
+                    cc3.button("Cancelar", key=f"nao_{reg['_linha']}",
+                               on_click=_cb_cancelar_apagar, args=(chave_conf,))
                 else:
-                    if c2.button("🗑️ Apagar", key=chave):
-                        st.session_state[chave_conf] = True
-                        st.rerun()
+                    c2.button("🗑️ Apagar", key=chave,
+                              on_click=_cb_abrir_apagar, args=(chave_conf,))
 
     # --- Cargas do vendedor ---
     elif aba_atual == "🚛 Cargas":
@@ -793,6 +839,31 @@ def tela_vendedor(nome):
         tabela_ranking(resumir(df[df["Data"] == hoje]), destaque=nome)
         st.subheader(f"Mês ({mes})")
         tabela_ranking(resumir(df[df["_mes"] == mes]), destaque=nome)
+
+
+# ----------------------------------------------------------------------------
+# Tela Gestor — callbacks
+# ----------------------------------------------------------------------------
+def _cb_add_carga(nome, data, vend, meta):
+    if not nome.strip() or not data.strip() or meta <= 0:
+        st.session_state["carga_erro"] = "Preencha todos os campos obrigatórios."
+    else:
+        salvar_carga(nome, data, vend, meta)
+        st.session_state["carga_flash"] = f"Carga '{nome}' adicionada!"
+        st.session_state.pop("carga_erro", None)
+
+
+def _cb_abrir_del_carga(chave):
+    st.session_state[chave] = True
+
+
+def _cb_confirmar_del_carga(linha, chave):
+    deletar_carga(linha)
+    st.session_state.pop(chave, None)
+
+
+def _cb_cancelar_del_carga(chave):
+    st.session_state.pop(chave, None)
 
 
 # ----------------------------------------------------------------------------
@@ -963,14 +1034,14 @@ def tela_gestor():
             nc_data    = c2.text_input("Data de entrega *", placeholder="Ex: 20/06/2026")
             nc_vend    = c3.selectbox("Vendedor responsável *", vendedores_lista)
             nc_meta    = c4.number_input("Meta (Kg) *", min_value=0.0, step=100.0, format="%.0f")
-            salvar_btn = st.form_submit_button("➕ Adicionar carga", type="primary")
-            if salvar_btn:
-                if not nc_nome.strip() or not nc_data.strip() or nc_meta <= 0:
-                    st.error("Preencha todos os campos obrigatórios.")
-                else:
-                    salvar_carga(nc_nome, nc_data, nc_vend, nc_meta)
-                    st.success(f"Carga '{nc_nome}' adicionada!")
-                    st.rerun()
+            st.form_submit_button(
+                "➕ Adicionar carga", type="primary",
+                on_click=_cb_add_carga, args=(nc_nome, nc_data, nc_vend, nc_meta),
+            )
+        if st.session_state.get("carga_erro"):
+            st.error(st.session_state.pop("carga_erro"))
+        if st.session_state.get("carga_flash"):
+            st.success(st.session_state.pop("carga_flash"))
 
         st.divider()
         st.subheader(f"Cargas cadastradas ({len(df_cargas)})")
@@ -994,8 +1065,10 @@ def tela_gestor():
                     text=f"{cor_total} Total realizado: {br(realiz_total)} / {br(meta_total)} kg  ({pct_total*100:.0f}%)"
                 )
 
+                progresso_por_vend = {}
                 for _, carga in grupo.iterrows():
                     realizado = progresso_carga(carga["Carga"], df, vendedor=carga["Vendedor"])
+                    progresso_por_vend[carga["Vendedor"]] = realizado
                     meta      = float(carga["Meta (Kg)"]) or 1.0
                     pct       = min(realizado / meta, 1.0)
                     cor       = "🟢" if pct >= 1.0 else ("🟡" if pct >= 0.6 else "🔴")
@@ -1006,22 +1079,18 @@ def tela_gestor():
                     chave_conf = f"gdc_{carga['_linha']}"
                     if st.session_state.get(chave_conf):
                         c2.warning("Apagar?")
-                        if c2.button("Sim", key=f"gsim_{carga['_linha']}"):
-                            deletar_carga(carga["_linha"])
-                            st.session_state.pop(chave_conf, None)
-                            st.rerun()
-                        if c2.button("Não", key=f"gnao_{carga['_linha']}"):
-                            st.session_state.pop(chave_conf, None)
-                            st.rerun()
+                        c2.button("Sim", key=f"gsim_{carga['_linha']}",
+                                  on_click=_cb_confirmar_del_carga, args=(carga["_linha"], chave_conf))
+                        c2.button("Não", key=f"gnao_{carga['_linha']}",
+                                  on_click=_cb_cancelar_del_carga, args=(chave_conf,))
                     else:
-                        if c2.button("🗑️", key=chave_del, help="Apagar"):
-                            st.session_state[chave_conf] = True
-                            st.rerun()
+                        c2.button("🗑️", key=chave_del, help="Apagar",
+                                  on_click=_cb_abrir_del_carga, args=(chave_conf,))
                 # Redistribuição sugerida (quando há múltiplos vendedores na carga)
                 if len(grupo) > 1:
                     pcts_vend = []
                     for _, c in grupo.iterrows():
-                        r = progresso_carga(c["Carga"], df, vendedor=c["Vendedor"])
+                        r = progresso_por_vend.get(c["Vendedor"], 0.0)
                         m = float(c["Meta (Kg)"]) or 1.0
                         pcts_vend.append((c["Vendedor"], r / m * 100))
                     melhor = max(pcts_vend, key=lambda x: x[1])
@@ -1172,6 +1241,17 @@ def tela_gestor():
 # ----------------------------------------------------------------------------
 # Fluxo principal
 # ----------------------------------------------------------------------------
+def _cb_logout():
+    st.session_state.pop("usuario", None)
+
+
+def _cb_atualizar_dados():
+    carregar_registros.clear()
+    carregar_vendedores.clear()
+    carregar_clientes.clear()
+    carregar_cargas.clear()
+
+
 def main():
     usuario = st.session_state.get("usuario")
     if not usuario:
@@ -1180,15 +1260,8 @@ def main():
 
     with st.sidebar:
         st.write(f"Conectado como **{usuario.title()}**")
-        if st.button("Sair"):
-            st.session_state.pop("usuario", None)
-            st.rerun()
-        if st.button("Atualizar dados"):
-            carregar_registros.clear()
-            carregar_vendedores.clear()
-            carregar_clientes.clear()
-            carregar_cargas.clear()
-            st.rerun()
+        st.button("Sair", on_click=_cb_logout)
+        st.button("Atualizar dados", on_click=_cb_atualizar_dados)
 
     if usuario == "GESTOR":
         tela_gestor()
