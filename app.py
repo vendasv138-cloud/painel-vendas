@@ -668,7 +668,7 @@ def tela_vendedor(nome):
         st.balloons()
 
     OPCOES_VEND = ["➕ Nova venda", "📄 Orçamentos em aberto",
-                   "📋 Meus lançamentos de hoje", "🚛 Cargas", "🏆 Ranking"]
+                   "📋 Meus lançamentos de hoje", "🚛 Cargas"]
     if "vend_aba" not in st.session_state:
         st.session_state["vend_aba"] = OPCOES_VEND[0]
     aba_atual = st.radio("Navegação", OPCOES_VEND, horizontal=True,
@@ -836,12 +836,6 @@ def tela_vendedor(nome):
                 st.caption(f"✅ {br(kg_meu)} kg vendido por você")
                 st.divider()
 
-    # --- Ranking ---
-    elif aba_atual == "🏆 Ranking":
-        st.subheader(f"Hoje ({hoje})")
-        tabela_ranking(resumir(df[df["Data"] == hoje]), destaque=nome)
-        st.subheader(f"Mês ({mes})")
-        tabela_ranking(resumir(df[df["_mes"] == mes]), destaque=nome)
 
 
 # ----------------------------------------------------------------------------
