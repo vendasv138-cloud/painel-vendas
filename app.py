@@ -11,6 +11,7 @@ import io
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -60,10 +61,7 @@ VENDEDORES_INICIAIS = [
     ["RENATA",    "7070", "SIM"],
 ]
 
-st.set_page_config(
-    page_title="Painel de Vendas", page_icon="📊", layout="wide",
-    initial_sidebar_state="collapsed" if st.session_state.get("usuario") else "auto",
-)
+st.set_page_config(page_title="Painel de Vendas", page_icon="📊", layout="wide")
 
 
 # ----------------------------------------------------------------------------
@@ -1269,6 +1267,29 @@ def main():
     if not usuario:
         tela_login()
         return
+
+    if not st.session_state.get("_sidebar_colapsada"):
+        st.session_state["_sidebar_colapsada"] = True
+        components.html(
+            """
+            <script>
+            function colapsarSidebar() {
+                const doc = window.parent.document;
+                const selectors = [
+                    '[data-testid="stSidebarCollapseButton"] button',
+                    '[data-testid="baseButton-headerNoPadding"]',
+                    'button[kind="headerNoPadding"]',
+                ];
+                for (const sel of selectors) {
+                    const btn = doc.querySelector(sel);
+                    if (btn) { btn.click(); break; }
+                }
+            }
+            setTimeout(colapsarSidebar, 250);
+            </script>
+            """,
+            height=0,
+        )
 
     with st.sidebar:
         st.write(f"Conectado como **{usuario.title()}**")
