@@ -603,13 +603,13 @@ def tela_login():
 # ----------------------------------------------------------------------------
 # Tela Vendedor — callbacks
 # ----------------------------------------------------------------------------
-def _cb_registrar(nome, cliente, cliente_novo, contato, resultado, kg, preco_kg, valor, carga_val, fv):
+def _cb_registrar(nome, cliente, cliente_novo, contato, resultado, kg, valor, carga_val, fv):
     if not carga_val:
         st.session_state["form_erro"] = "Selecione a carga antes de registrar."
     elif not cliente.strip():
         st.session_state["form_erro"] = "Informe o nome do cliente."
-    elif resultado != "Só contato" and (kg <= 0 or preco_kg <= 0):
-        st.session_state["form_erro"] = "Para orçamento ou venda, informe Kg e R$/kg."
+    elif resultado != "Só contato" and (kg <= 0 or valor <= 0):
+        st.session_state["form_erro"] = "Para orçamento ou venda, informe Kg e Valor total."
     else:
         salvar_registro(nome, cliente, cliente_novo, contato, resultado, kg, valor, carga_val)
         msg = "Lançamento registrado!"
@@ -703,20 +703,20 @@ def tela_vendedor(nome):
         resultado        = st.radio("Resultado do contato *", RESULTADOS,
                                     horizontal=True, key=f"res_{fv}")
 
-        kg = preco_kg = valor = 0.0
+        kg = valor = preco_kg = 0.0
         if resultado != "Só contato":
             c1, c2, c3 = st.columns(3)
-            kg       = c1.number_input("Kg *", min_value=0.0, step=10.0,
-                                       format="%.2f", key=f"kg_{fv}")
-            preco_kg = c2.number_input("R$/kg *", min_value=0.0,
-                                       step=0.5, format="%.2f", key=f"preco_{fv}")
-            valor    = round(kg * preco_kg, 2)
-            c3.metric("Valor total (automático)", "R$ " + br(valor))
+            kg    = c1.number_input("Kg *", min_value=0.0, step=10.0,
+                                    format="%.2f", key=f"kg_{fv}")
+            valor = c2.number_input("Valor total (R$) *", min_value=0.0,
+                                    step=100.0, format="%.2f", key=f"val_{fv}")
+            preco_kg = round(valor / kg, 2) if kg else 0.0
+            c3.metric("R$/kg (automático)", "R$ " + br(preco_kg))
 
         st.button(
             "✅ Registrar", type="primary",
             on_click=_cb_registrar,
-            args=(nome, cliente, cliente_novo, contato, resultado, kg, preco_kg, valor, carga_val, fv),
+            args=(nome, cliente, cliente_novo, contato, resultado, kg, valor, carga_val, fv),
         )
         if st.session_state.get("form_erro"):
             st.error(st.session_state.pop("form_erro"))
