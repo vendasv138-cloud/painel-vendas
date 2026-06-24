@@ -305,7 +305,7 @@ def carregar_registros():
     return df
 
 
-def salvar_registro(vendedor, cliente, cliente_novo, contato,
+def salvar_registro(vendedor, cliente, tipo_cliente, contato,
                     resultado, kg, valor, carga="",
                     contato_cliente="", recorrente=False, motivo_perda=""):
     sh = abrir_planilha()
@@ -315,6 +315,7 @@ def salvar_registro(vendedor, cliente, cliente_novo, contato,
         ws.update('A1', [CABECALHO_REGISTROS])
     ts = agora()
     preco_kg = round(valor / kg, 2) if kg and valor else 0
+    cliente_novo = tipo_cliente in ("Novo", "Prospecção")
     if cliente_novo and cliente.strip().upper() not in {
             c.upper() for c in carregar_clientes()}:
         cadastrar_cliente(cliente, vendedor)
@@ -326,7 +327,7 @@ def salvar_registro(vendedor, cliente, cliente_novo, contato,
             ts.strftime("%H:%M"),                                      # Hora
             vendedor,                                                  # Vendedor
             cliente.strip(),                                           # Cliente
-            "Novo" if cliente_novo else "Carteira",                    # Tipo cliente
+            tipo_cliente,                                              # Tipo cliente
             contato.strip(),                                           # Com quem falou
             resultado,                                                 # Resultado
             SITUACAO_ABERTO if resultado == "Orçamento enviado" else "-",  # Situação
@@ -387,7 +388,7 @@ def deletar_registro(linha_planilha):
 # Resumos
 # ----------------------------------------------------------------------------
 COLUNAS_RESUMO = [
-    "Vendedor", "Lançamentos", "Clientes novos", "Orçamentos",
+    "Vendedor", "Lançamentos", "Clientes novos", "Prospecção", "Orçamentos",
     "Vendas", "Kg vendido", "R$ vendido", "R$/kg médio",
     "Conversão (%)", "Taxa Perda (%)", "Recorrentes (%)", "Score",
 ]
@@ -402,6 +403,7 @@ def resumir(df):
         orcs     = g[g["Resultado"] == "Orçamento enviado"]
         perdidos = g[g["Situação"] == SITUACAO_PERDIDO] if "Situação" in g.columns else pd.DataFrame()
         novos    = g[g["Tipo cliente"] == "Novo"] if "Tipo cliente" in g.columns else pd.DataFrame()
+        prospec  = g[g["Tipo cliente"] == "Prospecção"] if "Tipo cliente" in g.columns else pd.DataFrame()
         recorr   = (g[g["Cliente Recorrente?"].astype(str).str.upper() == "SIM"]
                     if "Cliente Recorrente?" in g.columns else pd.DataFrame())
         kg  = vendas["Kg"].sum()
@@ -415,7 +417,7 @@ def resumir(df):
         recorr_pct = 100 * len(recorr) / len(g) if len(g) > 0 else 0.0
         score = round(conv * 0.5 + max(100 - perda, 0) * 0.3 + recorr_pct * 0.2, 1)
         linhas.append([
-            vend, len(g), len(novos), len(orcs), len(vendas),
+            vend, len(g), len(novos), len(prospec), len(orcs), len(vendas),
             round(kg, 2), round(rs, 2),
             round(rs / kg, 2) if kg else 0.0,
             round(conv, 1), round(perda, 1), round(recorr_pct, 1), score,
@@ -603,7 +605,7 @@ def tela_login():
 # ----------------------------------------------------------------------------
 # Tela Vendedor — callbacks
 # ----------------------------------------------------------------------------
-def _cb_registrar(nome, cliente, cliente_novo, contato, resultado, kg, valor, carga_val, fv):
+def _cb_registrar(nome, cliente, tipo_cliente, contato, resultado, kg, valor, carga_val, fv):
     if not carga_val:
         st.session_state["form_erro"] = "Selecione a carga antes de registrar."
     elif not cliente.strip():
@@ -611,10 +613,10 @@ def _cb_registrar(nome, cliente, cliente_novo, contato, resultado, kg, valor, ca
     elif resultado != "Só contato" and (kg <= 0 or valor <= 0):
         st.session_state["form_erro"] = "Para orçamento ou venda, informe Kg e Valor total."
     else:
-        salvar_registro(nome, cliente, cliente_novo, contato, resultado, kg, valor, carga_val)
+        salvar_registro(nome, cliente, tipo_cliente, contato, resultado, kg, valor, carga_val)
         msg = "Lançamento registrado!"
-        if cliente_novo:
-            msg += f" Cliente novo '{cliente.strip()}' cadastrado."
+        if tipo_cliente in ("Novo", "Prospecção"):
+            msg += f" Cliente {'em prospecção' if tipo_cliente == 'Prospecção' else 'novo'} '{cliente.strip()}' cadastrado."
         st.session_state["flash"] = msg + " Data e hora gravadas automaticamente."
         st.session_state["form_ver"] = fv + 1
         st.session_state["mostrar_balloons"] = True
@@ -693,11 +695,11 @@ def tela_vendedor(nome):
         _sugerido = "Carteira" if cliente.strip().upper() in _clientes_set and cliente.strip() else "Novo"
         tipo = st.radio(
             "Tipo de cliente *",
-            ["Carteira", "Novo"],
-            index=["Carteira", "Novo"].index(_sugerido),
+            ["Carteira", "Novo", "Prospecção"],
+            index=["Carteira", "Novo", "Prospecção"].index(_sugerido),
             horizontal=True, key=f"tipo_{fv}",
         )
-        cliente_novo = tipo == "Novo"
+        cliente_novo = tipo in ("Novo", "Prospecção")
         with st.expander("Com quem falou / detalhes"):
             contato = st.text_input("Com quem falou", key=f"cont_{fv}")
         resultado        = st.radio("Resultado do contato *", RESULTADOS,
@@ -716,7 +718,7 @@ def tela_vendedor(nome):
         st.button(
             "✅ Registrar", type="primary",
             on_click=_cb_registrar,
-            args=(nome, cliente, cliente_novo, contato, resultado, kg, valor, carga_val, fv),
+            args=(nome, cliente, tipo, contato, resultado, kg, valor, carga_val, fv),
         )
         if st.session_state.get("form_erro"):
             st.error(st.session_state.pop("form_erro"))
@@ -893,14 +895,16 @@ def tela_gestor():
     # --- Hoje ---
     if aba_atual == "📅 Hoje":
         kpis = _kpis(df_hoje)
-        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
         c1.metric("Lançamentos",     len(df_hoje))
         c2.metric("Clientes novos",  int((df_hoje["Tipo cliente"] == "Novo").sum())
                   if "Tipo cliente" in df_hoje.columns else 0)
-        c3.metric("Vendas fechadas", kpis["n_vendas"])
-        c4.metric("Kg vendido",      br(kpis["kg"]))
-        c5.metric("R$ vendido",      "R$ " + br(kpis["rs"]))
-        c6.metric("Ticket médio",    "R$ " + br(kpis["ticket"]))
+        c3.metric("Prospecção",      int((df_hoje["Tipo cliente"] == "Prospecção").sum())
+                  if "Tipo cliente" in df_hoje.columns else 0)
+        c4.metric("Vendas fechadas", kpis["n_vendas"])
+        c5.metric("Kg vendido",      br(kpis["kg"]))
+        c6.metric("R$ vendido",      "R$ " + br(kpis["rs"]))
+        c7.metric("Ticket médio",    "R$ " + br(kpis["ticket"]))
 
         c1b, c2b, c3b, c4b = st.columns(4)
         c1b.metric("Taxa conversão",        f"{kpis['conv']:.0f}%")
@@ -938,14 +942,16 @@ def tela_gestor():
     elif aba_atual == "📈 Mês":
         kpis = _kpis(df_mes)
         vendas_mes = df_mes[df_mes["Resultado"] == "Venda fechada"]
-        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
         c1.metric("Lançamentos",     len(df_mes))
         c2.metric("Clientes novos",  int((df_mes["Tipo cliente"] == "Novo").sum())
                   if "Tipo cliente" in df_mes.columns else 0)
-        c3.metric("Vendas fechadas", kpis["n_vendas"])
-        c4.metric("Kg vendido",      br(kpis["kg"]))
-        c5.metric("R$ vendido",      "R$ " + br(kpis["rs"]))
-        c6.metric("Ticket médio",    "R$ " + br(kpis["ticket"]))
+        c3.metric("Prospecção",      int((df_mes["Tipo cliente"] == "Prospecção").sum())
+                  if "Tipo cliente" in df_mes.columns else 0)
+        c4.metric("Vendas fechadas", kpis["n_vendas"])
+        c5.metric("Kg vendido",      br(kpis["kg"]))
+        c6.metric("R$ vendido",      "R$ " + br(kpis["rs"]))
+        c7.metric("Ticket médio",    "R$ " + br(kpis["ticket"]))
 
         c1b, c2b, c3b = st.columns(3)
         c1b.metric("Taxa conversão", f"{kpis['conv']:.0f}%")
