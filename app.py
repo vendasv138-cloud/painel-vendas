@@ -61,7 +61,8 @@ VENDEDORES_INICIAIS = [
     ["RENATA",    "7070", "SIM"],
 ]
 
-st.set_page_config(page_title="Painel de Vendas", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Painel de Vendas", page_icon="📊", layout="wide",
+                    initial_sidebar_state="collapsed")
 
 
 # ----------------------------------------------------------------------------
@@ -580,6 +581,7 @@ def _cb_login(nome, senha, vendedores):
     if ok and senha:
         st.session_state["usuario"] = nome
         st.session_state.pop("login_erro", None)
+        st.session_state["_sidebar_colapsada"] = False
     else:
         st.session_state["login_erro"] = "PIN/senha incorreto. Tente novamente."
 
@@ -1281,6 +1283,10 @@ def main():
             <script>
             function colapsarSidebar() {
                 const doc = window.parent.document;
+                const sidebar = doc.querySelector('[data-testid="stSidebar"]');
+                if (sidebar && sidebar.getAttribute('aria-expanded') === 'false') {
+                    return true;  // já está escondida
+                }
                 const selectors = [
                     '[data-testid="stSidebarCollapseButton"] button',
                     '[data-testid="baseButton-headerNoPadding"]',
@@ -1288,10 +1294,15 @@ def main():
                 ];
                 for (const sel of selectors) {
                     const btn = doc.querySelector(sel);
-                    if (btn) { btn.click(); break; }
+                    if (btn) { btn.click(); return true; }
                 }
+                return false;
             }
-            setTimeout(colapsarSidebar, 250);
+            let tentativas = 0;
+            const intervalo = setInterval(() => {
+                tentativas++;
+                if (colapsarSidebar() || tentativas > 20) clearInterval(intervalo);
+            }, 150);
             </script>
             """,
             height=0,
