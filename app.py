@@ -148,13 +148,7 @@ def garantir_estrutura(sh):
 # ----------------------------------------------------------------------------
 @st.cache_data(ttl=60)
 def carregar_cargas():
-    sh = abrir_planilha()
-    titulos = [ws.title for ws in sh.worksheets()]
-    if ABA_CARGAS not in titulos:
-        ws = sh.add_worksheet(title=ABA_CARGAS, rows=200, cols=5)
-        ws.update(values=[CABECALHO_CARGAS], range_name="A1")
-        ws.format("A1:D1", {"textFormat": {"bold": True}})
-        return pd.DataFrame(columns=CABECALHO_CARGAS + ["_linha"])
+    sh = abrir_planilha()  # garantir_estrutura() já criou a aba Cargas
     dados = sh.worksheet(ABA_CARGAS).get_all_records(
         expected_headers=CABECALHO_CARGAS
     )
@@ -311,9 +305,11 @@ def salvar_registro(vendedor, cliente, tipo_cliente, contato,
                     contato_cliente="", recorrente=False, motivo_perda=""):
     sh = abrir_planilha()
     ws = sh.worksheet(ABA_REGISTROS)
-    # Repara o cabeçalho se estiver corrompido (colunas extras/vazias)
-    if ws.row_values(1) != CABECALHO_REGISTROS:
-        ws.update('A1', [CABECALHO_REGISTROS])
+    # Repara o cabeçalho se estiver corrompido — checagem 1x por sessão
+    if not st.session_state.get("_cab_ok"):
+        if ws.row_values(1) != CABECALHO_REGISTROS:
+            ws.update('A1', [CABECALHO_REGISTROS])
+        st.session_state["_cab_ok"] = True
     ts = agora()
     preco_kg = round(valor / kg, 2) if kg and valor else 0
     cliente_novo = tipo_cliente in ("Novo", "Prospecção")
@@ -615,7 +611,14 @@ def _cb_registrar(nome, cliente, tipo_cliente, contato, resultado, kg, valor, ca
     elif resultado != "Só contato" and (kg <= 0 or valor <= 0):
         st.session_state["form_erro"] = "Para orçamento ou venda, informe Kg e Valor total."
     else:
-        salvar_registro(nome, cliente, tipo_cliente, contato, resultado, kg, valor, carga_val)
+        try:
+            salvar_registro(nome, cliente, tipo_cliente, contato, resultado, kg, valor, carga_val)
+        except Exception:
+            st.session_state["form_erro"] = (
+                "Não consegui gravar na planilha (conexão ou limite do Google). "
+                "Aguarde 30 segundos e clique em Registrar de novo — os dados digitados foram mantidos."
+            )
+            return
         msg = "Lançamento registrado!"
         if tipo_cliente in ("Novo", "Prospecção"):
             msg += f" Cliente {'em prospecção' if tipo_cliente == 'Prospecção' else 'novo'} '{cliente.strip()}' cadastrado."
@@ -687,21 +690,28 @@ def tela_vendedor(nome):
     if aba_atual == "➕ Nova venda":
         opcoes_carga = list(df_cargas["Carga"].unique()) if not df_cargas.empty else []
         if opcoes_carga:
-            carga_val = st.selectbox("🚛 Carga *", opcoes_carga, key=f"carga_{fv}")
+            # Pré-seleciona a carga atribuída ao vendedor, se houver
+            minhas = df_cargas.loc[df_cargas["Vendedor"] == nome, "Carga"].tolist()
+            idx_carga = opcoes_carga.index(minhas[0]) if minhas and minhas[0] in opcoes_carga else 0
+            carga_val = st.selectbox("🚛 Carga *", opcoes_carga, index=idx_carga, key=f"carga_{fv}")
         else:
             st.warning("Nenhuma carga cadastrada. Peça ao gestor para cadastrar antes de lançar.")
             carga_val = ""
 
-        cliente = st.text_input("Cliente *", key=f"cli_{fv}")
-        _clientes_set = set(c.upper() for c in carregar_clientes())
-        _sugerido = "Carteira" if cliente.strip().upper() in _clientes_set and cliente.strip() else "Novo"
-        tipo = st.radio(
-            "Tipo de cliente *",
-            ["Carteira", "Novo", "Prospecção"],
-            index=["Carteira", "Novo", "Prospecção"].index(_sugerido),
-            horizontal=True, key=f"tipo_{fv}",
+        OPCAO_CLIENTE_NOVO = "➕ CLIENTE NOVO (digitar o nome)"
+        cliente_sel = st.selectbox(
+            "Cliente *",
+            carregar_clientes() + [OPCAO_CLIENTE_NOVO],
+            index=None, placeholder="Digite para buscar ou selecione...",
+            key=f"clisel_{fv}",
         )
-        cliente_novo = tipo in ("Novo", "Prospecção")
+        if cliente_sel == OPCAO_CLIENTE_NOVO:
+            cliente = st.text_input("Nome do cliente novo *", key=f"clin_{fv}")
+            tipo = st.radio("Tipo de cliente *", ["Novo", "Prospecção"],
+                            horizontal=True, key=f"tipo_{fv}")
+        else:
+            cliente = cliente_sel or ""
+            tipo = "Carteira"
         with st.expander("Com quem falou / detalhes"):
             contato = st.text_input("Com quem falou", key=f"cont_{fv}")
         resultado        = st.radio("Resultado do contato *", RESULTADOS,
