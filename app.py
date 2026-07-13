@@ -746,12 +746,16 @@ def tela_vendedor(nome):
         )
         if tipo == "Carteira":
             # Cliente da carteira: seleciona da lista (evita duplicata por erro de digitação)
-            cliente = st.selectbox(
+            cliente_lista = st.selectbox(
                 "Cliente *",
                 carregar_clientes(),
                 index=None, placeholder="Digite para buscar...",
                 key=f"clisel_{fv}",
-            ) or ""
+            )
+            outro_nome = st.checkbox("Cliente não está na lista (digitar nome)",
+                                     key=f"cliout_chk_{fv}")
+            cliente = (st.text_input("Nome do cliente", key=f"cliout_{fv}")
+                       if outro_nome else (cliente_lista or ""))
         else:
             # Novo/Prospecção: nome ainda não existe na base, digitação é inevitável
             cliente = st.text_input("Nome do cliente *", key=f"clin_{fv}")
@@ -798,13 +802,17 @@ def tela_vendedor(nome):
                 if pd.notna(dias) and dias != "":
                     dias_num = int(dias)
                     dias_str = f" ⚠️ {dias_num} dias aberto" if dias_num > 5 else f" ({dias_num}d)"
-                c1, c2, c3 = st.columns([3, 1, 1])
+                c1, c2, c_edit, c3 = st.columns([3, 1, 1, 1])
                 c1.write(
                     f"**{reg['Cliente']}** — {reg['Data']} — "
                     f"{br(reg['Kg'])} kg — R$ {br(reg['Valor (R$)'])}{dias_str}"
                 )
                 c2.button("✅ Aprovou", key=f"ap{reg['_linha']}",
                           on_click=_cb_aprovar, args=(reg,))
+
+                chave_edit_orc = f"editorc_{reg['_linha']}"
+                c_edit.button("✏️ Editar", key=f"edorc_{reg['_linha']}",
+                              on_click=_cb_abrir_editar, args=(chave_edit_orc,))
 
                 # Perdido: abre dropdown de motivo antes de confirmar
                 chave_perd = f"perd_motivo_{reg['_linha']}"
@@ -832,6 +840,22 @@ def tela_vendedor(nome):
                 else:
                     c3.button("❌ Perdido", key=f"pd{reg['_linha']}",
                               on_click=_cb_abrir_perdido, args=(chave_perd,))
+
+                # Editar Kg/Valor do orçamento antes que o cliente responda
+                if st.session_state.get(chave_edit_orc):
+                    kg_key  = f"kgeditorc_{reg['_linha']}"
+                    val_key = f"valeditorc_{reg['_linha']}"
+                    ce1, ce2, ce3 = st.columns([2, 2, 1])
+                    ce1.number_input("Kg", min_value=0.0, step=10.0, format="%.2f",
+                                      value=float(reg["Kg"]), key=kg_key)
+                    ce2.number_input("Valor total (R$)", min_value=0.0, step=100.0,
+                                      format="%.2f", value=float(reg["Valor (R$)"]), key=val_key)
+                    ce3.button("💾 Salvar", key=f"saveditorc_{reg['_linha']}", type="primary",
+                               on_click=_cb_salvar_edicao,
+                               args=(reg["_linha"], chave_edit_orc, kg_key, val_key))
+                    ce3.button("Cancelar", key=f"canceleditorc_{reg['_linha']}",
+                               on_click=_cb_cancelar_editar, args=(chave_edit_orc,))
+                st.divider()
 
     # --- Meus lançamentos de hoje ---
     elif aba_atual == "📋 Meus lançamentos de hoje":
