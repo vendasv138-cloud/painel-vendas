@@ -739,23 +739,22 @@ def tela_vendedor(nome):
             st.warning("Nenhuma carga cadastrada. Peça ao gestor para cadastrar antes de lançar.")
             carga_val = ""
 
-        OPCAO_CLIENTE_NOVO = "➕ CLIENTE NOVO (digitar o nome)"
-        cliente_sel = st.selectbox(
-            "Cliente *",
-            carregar_clientes() + [OPCAO_CLIENTE_NOVO],
-            index=None, placeholder="Digite para buscar ou selecione...",
-            key=f"clisel_{fv}",
-        )
-        cliente = (st.text_input("Nome do cliente novo *", key=f"clin_{fv}")
-                   if cliente_sel == OPCAO_CLIENTE_NOVO else (cliente_sel or ""))
-
-        _sugerido = "Novo" if cliente_sel == OPCAO_CLIENTE_NOVO else "Carteira"
         tipo = st.radio(
             "Tipo de cliente *",
             ["Carteira", "Novo", "Prospecção"],
-            index=["Carteira", "Novo", "Prospecção"].index(_sugerido),
             horizontal=True, key=f"tipo_{fv}",
         )
+        if tipo == "Carteira":
+            # Cliente da carteira: seleciona da lista (evita duplicata por erro de digitação)
+            cliente = st.selectbox(
+                "Cliente *",
+                carregar_clientes(),
+                index=None, placeholder="Digite para buscar...",
+                key=f"clisel_{fv}",
+            ) or ""
+        else:
+            # Novo/Prospecção: nome ainda não existe na base, digitação é inevitável
+            cliente = st.text_input("Nome do cliente *", key=f"clin_{fv}")
         with st.expander("Com quem falou / detalhes"):
             contato = st.text_input("Com quem falou", key=f"cont_{fv}")
         resultado        = st.radio("Resultado do contato *", RESULTADOS,
