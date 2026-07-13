@@ -363,7 +363,7 @@ def aprovar_orcamento(reg):
     _atualizar_celula(reg["_linha"], "Data Resposta Orçamento",
                       agora().strftime("%d/%m/%Y"))
     salvar_registro(
-        reg["Vendedor"], reg["Cliente"], False,
+        reg["Vendedor"], reg["Cliente"], "Carteira",
         str(reg["Com quem falou"]), "Venda fechada",
         float(reg["Kg"]), float(reg["Valor (R$)"]),
         str(reg.get("Carga", "")),
