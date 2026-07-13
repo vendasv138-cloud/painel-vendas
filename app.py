@@ -381,6 +381,14 @@ def deletar_registro(linha_planilha):
     carregar_registros.clear()
 
 
+def editar_registro(linha_planilha, kg, valor):
+    preco_kg = round(valor / kg, 2) if kg and valor else 0
+    _atualizar_celula(linha_planilha, "Kg", round(float(kg), 2))
+    _atualizar_celula(linha_planilha, "Valor (R$)", round(float(valor), 2))
+    _atualizar_celula(linha_planilha, "R$/kg", preco_kg)
+    carregar_registros.clear()
+
+
 # ----------------------------------------------------------------------------
 # Resumos
 # ----------------------------------------------------------------------------
@@ -391,6 +399,21 @@ COLUNAS_RESUMO = [
 ]
 
 
+def _taxas_conv_perda(g):
+    """Taxa de conversão e taxa de perda para um recorte de registros.
+    Única fonte da fórmula — usada por resumir() e _kpis() para evitar divergência."""
+    vendas   = g[g["Resultado"] == "Venda fechada"]
+    orcs     = g[g["Resultado"] == "Orçamento enviado"]
+    perdidos = g[g["Situação"] == SITUACAO_PERDIDO] if "Situação" in g.columns else pd.DataFrame()
+    # Orçamentos aprovados já viraram venda — excluir do denominador para não duplicar
+    orcs_pendentes = orcs[orcs["Situação"] != SITUACAO_APROVADO] if "Situação" in orcs.columns else orcs
+    dec_conv  = len(vendas) + len(orcs_pendentes)
+    dec_perda = len(vendas) + len(perdidos)
+    conv  = 100 * len(vendas) / dec_conv  if dec_conv  > 0 else 0.0
+    perda = 100 * len(perdidos) / dec_perda if dec_perda > 0 else 0.0
+    return conv, perda
+
+
 def resumir(df):
     if df.empty:
         return pd.DataFrame(columns=COLUNAS_RESUMO)
@@ -398,19 +421,13 @@ def resumir(df):
     for vend, g in df.groupby("Vendedor"):
         vendas   = g[g["Resultado"] == "Venda fechada"]
         orcs     = g[g["Resultado"] == "Orçamento enviado"]
-        perdidos = g[g["Situação"] == SITUACAO_PERDIDO] if "Situação" in g.columns else pd.DataFrame()
         novos    = g[g["Tipo cliente"] == "Novo"] if "Tipo cliente" in g.columns else pd.DataFrame()
         prospec  = g[g["Tipo cliente"] == "Prospecção"] if "Tipo cliente" in g.columns else pd.DataFrame()
         recorr   = (g[g["Cliente Recorrente?"].astype(str).str.upper() == "SIM"]
                     if "Cliente Recorrente?" in g.columns else pd.DataFrame())
         kg  = vendas["Kg"].sum()
         rs  = vendas["Valor (R$)"].sum()
-        # Orçamentos aprovados já viraram venda — excluir do denominador para não duplicar
-        orcs_pendentes = orcs[orcs["Situação"] != SITUACAO_APROVADO] if "Situação" in orcs.columns else orcs
-        dec_conv  = len(vendas) + len(orcs_pendentes)
-        dec_perda = len(vendas) + len(perdidos)
-        conv  = 100 * len(vendas) / dec_conv  if dec_conv  > 0 else 0.0
-        perda = 100 * len(perdidos) / dec_perda if dec_perda > 0 else 0.0
+        conv, perda = _taxas_conv_perda(g)
         recorr_pct = 100 * len(recorr) / len(g) if len(g) > 0 else 0.0
         score = round(conv * 0.5 + max(100 - perda, 0) * 0.3 + recorr_pct * 0.2, 1)
         linhas.append([
@@ -433,9 +450,7 @@ def _kpis(df):
                 if "Cliente Recorrente?" in df.columns else pd.DataFrame())
     kg  = vendas["Kg"].sum()
     rs  = vendas["Valor (R$)"].sum()
-    orcs_pendentes = orcs[orcs["Situação"] != SITUACAO_APROVADO] if "Situação" in orcs.columns else orcs
-    dec_conv  = len(vendas) + len(orcs_pendentes)
-    dec_perda = len(vendas) + len(perdidos)
+    conv, perda_pct = _taxas_conv_perda(df)
     return {
         "n_vendas":   len(vendas),
         "n_orcs":     len(orcs),
@@ -443,8 +458,8 @@ def _kpis(df):
         "kg":         kg,
         "rs":         rs,
         "ticket":     rs / len(vendas) if len(vendas) > 0 else 0.0,
-        "conv":       100 * len(vendas) / dec_conv  if dec_conv  > 0 else 0.0,
-        "perda_pct":  100 * len(perdidos) / dec_perda if dec_perda > 0 else 0.0,
+        "conv":       conv,
+        "perda_pct":  perda_pct,
         "recorr_pct": 100 * len(recorr) / len(df)  if len(df)   > 0 else 0.0,
     }
 
@@ -472,6 +487,16 @@ def atualizar_abas_analise():
         for linha in res_mes.astype(object).values.tolist():
             valores.append([mes] + linha)
     ws.update(values=valores, range_name="A1")
+
+
+@st.cache_data(ttl=600)
+def _atualizar_abas_analise_auto():
+    """Roda atualizar_abas_analise() no máximo 1x a cada 10 min (backup automático)."""
+    try:
+        atualizar_abas_analise()
+    except Exception:
+        pass
+    return agora().strftime("%d/%m/%Y %H:%M")
 
 
 # ----------------------------------------------------------------------------
@@ -662,6 +687,22 @@ def _cb_cancelar_apagar(chave):
     st.session_state.pop(chave, None)
 
 
+def _cb_abrir_editar(chave):
+    st.session_state[chave] = True
+
+
+def _cb_salvar_edicao(linha, chave, kg_key, val_key):
+    kg    = st.session_state.get(kg_key, 0.0)
+    valor = st.session_state.get(val_key, 0.0)
+    editar_registro(linha, kg, valor)
+    st.session_state.pop(chave, None)
+    st.session_state["flash"] = "Lançamento atualizado."
+
+
+def _cb_cancelar_editar(chave):
+    st.session_state.pop(chave, None)
+
+
 # ----------------------------------------------------------------------------
 # Tela Vendedor
 # ----------------------------------------------------------------------------
@@ -799,14 +840,15 @@ def tela_vendedor(nome):
             st.info("Nenhum lançamento hoje.")
         else:
             for _, reg in meus.iterrows():
-                c1, c2 = st.columns([5, 1])
+                c1, c2, c3 = st.columns([4, 1, 1])
                 carga_info = f" | 🚛 {reg['Carga']}" if str(reg.get("Carga", "")).strip() else ""
                 c1.write(
                     f"**{reg['Hora']}** — {reg['Cliente']} — {reg['Resultado']} — "
                     f"{br(reg['Kg'])} kg — R$ {br(reg['Valor (R$)'])}{carga_info}"
                 )
-                chave      = f"del_{reg['_linha']}"
+                chave_edit = f"edit_{reg['_linha']}"
                 chave_conf = f"conf_{reg['_linha']}"
+
                 if st.session_state.get(chave_conf):
                     cc1, cc2, cc3 = st.columns([3, 1, 1])
                     cc1.warning("Confirma exclusão deste lançamento?")
@@ -814,8 +856,23 @@ def tela_vendedor(nome):
                                on_click=_cb_confirmar_apagar, args=(reg["_linha"], chave_conf))
                     cc3.button("Cancelar", key=f"nao_{reg['_linha']}",
                                on_click=_cb_cancelar_apagar, args=(chave_conf,))
+                elif st.session_state.get(chave_edit):
+                    kg_key  = f"kgedit_{reg['_linha']}"
+                    val_key = f"valedit_{reg['_linha']}"
+                    ce1, ce2, ce3 = st.columns([2, 2, 1])
+                    ce1.number_input("Kg", min_value=0.0, step=10.0, format="%.2f",
+                                      value=float(reg["Kg"]), key=kg_key)
+                    ce2.number_input("Valor total (R$)", min_value=0.0, step=100.0,
+                                      format="%.2f", value=float(reg["Valor (R$)"]), key=val_key)
+                    ce3.button("💾 Salvar", key=f"savedit_{reg['_linha']}", type="primary",
+                               on_click=_cb_salvar_edicao,
+                               args=(reg["_linha"], chave_edit, kg_key, val_key))
+                    ce3.button("Cancelar", key=f"canceledit_{reg['_linha']}",
+                               on_click=_cb_cancelar_editar, args=(chave_edit,))
                 else:
-                    c2.button("🗑️ Apagar", key=chave,
+                    c2.button("✏️ Editar", key=f"ed_{reg['_linha']}",
+                              on_click=_cb_abrir_editar, args=(chave_edit,))
+                    c3.button("🗑️ Apagar", key=f"del_{reg['_linha']}",
                               on_click=_cb_abrir_apagar, args=(chave_conf,))
 
     # --- Cargas do vendedor ---
@@ -880,6 +937,7 @@ def _cb_cancelar_del_carga(chave):
 # ----------------------------------------------------------------------------
 def tela_gestor():
     st.title("Painel do Gestor")
+    ultima_att_analise = _atualizar_abas_analise_auto()
     df        = carregar_registros()
     df_cargas = carregar_cargas()
     hoje      = agora().strftime("%d/%m/%Y")
@@ -1261,9 +1319,11 @@ def tela_gestor():
             file_name=f"vendas_{agora().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
-        if st.button("🔄 Atualizar abas de análise na planilha"):
-            atualizar_abas_analise()
-            st.success("Abas 'Análise Diária' e 'Análise Mensal' atualizadas.")
+        st.caption(f"Abas 'Análise Diária' e 'Análise Mensal' atualizadas automaticamente "
+                   f"(última: {ultima_att_analise}, a cada 10 min).")
+        if st.button("🔄 Forçar atualização agora"):
+            _atualizar_abas_analise_auto.clear()
+            st.rerun()
 
 
 # ----------------------------------------------------------------------------
