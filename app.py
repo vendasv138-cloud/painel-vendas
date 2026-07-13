@@ -746,13 +746,16 @@ def tela_vendedor(nome):
             index=None, placeholder="Digite para buscar ou selecione...",
             key=f"clisel_{fv}",
         )
-        if cliente_sel == OPCAO_CLIENTE_NOVO:
-            cliente = st.text_input("Nome do cliente novo *", key=f"clin_{fv}")
-            tipo = st.radio("Tipo de cliente *", ["Novo", "Prospecção"],
-                            horizontal=True, key=f"tipo_{fv}")
-        else:
-            cliente = cliente_sel or ""
-            tipo = "Carteira"
+        cliente = (st.text_input("Nome do cliente novo *", key=f"clin_{fv}")
+                   if cliente_sel == OPCAO_CLIENTE_NOVO else (cliente_sel or ""))
+
+        _sugerido = "Novo" if cliente_sel == OPCAO_CLIENTE_NOVO else "Carteira"
+        tipo = st.radio(
+            "Tipo de cliente *",
+            ["Carteira", "Novo", "Prospecção"],
+            index=["Carteira", "Novo", "Prospecção"].index(_sugerido),
+            horizontal=True, key=f"tipo_{fv}",
+        )
         with st.expander("Com quem falou / detalhes"):
             contato = st.text_input("Com quem falou", key=f"cont_{fv}")
         resultado        = st.radio("Resultado do contato *", RESULTADOS,
