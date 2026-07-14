@@ -64,6 +64,14 @@ VENDEDORES_INICIAIS = [
 st.set_page_config(page_title="Painel de Vendas", page_icon="📊", layout="wide",
                     initial_sidebar_state="collapsed")
 
+st.markdown("""
+<style>
+div[data-testid="stMetricValue"] { font-size: 1.4rem; }
+div[data-testid="stMetricLabel"] { font-size: 0.85rem; }
+div[data-testid="stMetricDelta"] { font-size: 0.8rem; }
+</style>
+""", unsafe_allow_html=True)
+
 
 # ----------------------------------------------------------------------------
 # Utilidades
