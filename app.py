@@ -539,6 +539,18 @@ def _intel_carga(data_entrega_str, meta_kg, realizado_kg, df_registros, carga_no
 # ----------------------------------------------------------------------------
 # Componentes de tela
 # ----------------------------------------------------------------------------
+def seletor_mes(df, key, mes_padrao=None, incluir_todos=True):
+    """Selectbox de mês com base nos meses presentes em df["_mes"].
+    Retorna o mês escolhido ('mm/aaaa') ou None quando 'Todos os meses'."""
+    meses_disponiveis = sorted(df["_mes"].dropna().unique(), reverse=True)
+    if not meses_disponiveis:
+        return None
+    opcoes = (["Todos os meses"] + meses_disponiveis) if incluir_todos else meses_disponiveis
+    idx = opcoes.index(mes_padrao) if mes_padrao and mes_padrao in opcoes else 0
+    escolha = st.selectbox("📅 Mês", opcoes, index=idx, key=key)
+    return None if escolha == "Todos os meses" else escolha
+
+
 def tabela_ranking(res, destaque=None):
     if res.empty:
         st.info("Nenhum lançamento ainda.")
@@ -990,7 +1002,6 @@ def tela_gestor():
     hoje      = agora().strftime("%d/%m/%Y")
     mes       = agora().strftime("%m/%Y")
     df_hoje   = df[df["Data"] == hoje]
-    df_mes    = df[df["_mes"] == mes]
 
     # Orçamentos vencidos (todos, não só hoje)
     orc_todos_abertos = df[
@@ -1057,14 +1068,17 @@ def tela_gestor():
 
     # --- Mês ---
     elif aba_atual == "📈 Mês":
-        kpis = _kpis(df_mes)
-        vendas_mes = df_mes[df_mes["Resultado"] == "Venda fechada"]
+        mes_sel = seletor_mes(df, key="gestor_mes_sel", mes_padrao=mes)
+        df_mes_view = df if mes_sel is None else df[df["_mes"] == mes_sel]
+
+        kpis = _kpis(df_mes_view)
+        vendas_mes = df_mes_view[df_mes_view["Resultado"] == "Venda fechada"]
         c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
-        c1.metric("Lançamentos",     len(df_mes))
-        c2.metric("Clientes novos",  int((df_mes["Tipo cliente"] == "Novo").sum())
-                  if "Tipo cliente" in df_mes.columns else 0)
-        c3.metric("Prospecção",      int((df_mes["Tipo cliente"] == "Prospecção").sum())
-                  if "Tipo cliente" in df_mes.columns else 0)
+        c1.metric("Lançamentos",     len(df_mes_view))
+        c2.metric("Clientes novos",  int((df_mes_view["Tipo cliente"] == "Novo").sum())
+                  if "Tipo cliente" in df_mes_view.columns else 0)
+        c3.metric("Prospecção",      int((df_mes_view["Tipo cliente"] == "Prospecção").sum())
+                  if "Tipo cliente" in df_mes_view.columns else 0)
         c4.metric("Vendas fechadas", kpis["n_vendas"])
         c5.metric("Kg vendido",      br(kpis["kg"]))
         c6.metric("R$ vendido",      "R$ " + br(kpis["rs"]))
@@ -1075,16 +1089,24 @@ def tela_gestor():
         c2b.metric("Taxa de perda",  f"{kpis['perda_pct']:.0f}%")
         c3b.metric("Recorrência",    f"{kpis['recorr_pct']:.0f}%")
 
-        tabela_ranking(resumir(df_mes))
+        tabela_ranking(resumir(df_mes_view))
         if not vendas_mes.empty:
-            st.subheader("Kg vendido por dia")
-            por_dia = vendas_mes.groupby("Data")["Kg"].sum()
-            por_dia.index = pd.to_datetime(por_dia.index, format="%d/%m/%Y")
-            st.bar_chart(por_dia.sort_index())
+            if mes_sel is None:
+                st.subheader("Kg vendido por mês")
+                por_periodo = vendas_mes.groupby("_mes")["Kg"].sum()
+                por_periodo.index = pd.to_datetime(por_periodo.index, format="%m/%Y")
+                st.bar_chart(por_periodo.sort_index())
+            else:
+                st.subheader("Kg vendido por dia")
+                por_dia = vendas_mes.groupby("Data")["Kg"].sum()
+                por_dia.index = pd.to_datetime(por_dia.index, format="%d/%m/%Y")
+                st.bar_chart(por_dia.sort_index())
 
     # --- Orçamentos ---
     elif aba_atual == "💰 Orçamentos":
-        orc     = df[df["Resultado"] == "Orçamento enviado"]
+        mes_sel_orc = seletor_mes(df, key="gestor_mes_orc")
+        df_orc_base = df if mes_sel_orc is None else df[df["_mes"] == mes_sel_orc]
+        orc     = df_orc_base[df_orc_base["Resultado"] == "Orçamento enviado"]
         abertos = orc[orc["Situação"] == SITUACAO_ABERTO]
         aprov   = orc[orc["Situação"] == SITUACAO_APROVADO]
         perd    = orc[orc["Situação"] == SITUACAO_PERDIDO]
@@ -1237,10 +1259,13 @@ def tela_gestor():
 
     # --- Funil ---
     elif aba_atual == "🔻 Funil":
-        st.caption("Contatos → Orçamentos → Vendas (mês atual)")
-        res = resumir(df_mes)
+        mes_sel_funil = seletor_mes(df, key="gestor_mes_funil", mes_padrao=mes)
+        df_funil = df if mes_sel_funil is None else df[df["_mes"] == mes_sel_funil]
+        st.caption("Contatos → Orçamentos → Vendas ("
+                   + (mes_sel_funil if mes_sel_funil else "todos os meses") + ")")
+        res = resumir(df_funil)
         if res.empty:
-            st.info("Sem dados no mês.")
+            st.info("Sem dados no período.")
         else:
             fun = res[["Vendedor", "Lançamentos", "Orçamentos", "Vendas",
                        "Conversão (%)", "Taxa Perda (%)"]]
@@ -1255,18 +1280,17 @@ def tela_gestor():
         if perdidos_df.empty:
             st.info("Nenhuma perda registrada ainda.")
         else:
-            periodo = st.radio("Período:", ["Mês atual", "Todos os meses"],
-                               horizontal=True, key="perd_periodo")
-            if periodo == "Mês atual":
-                perdidos_df = perdidos_df[perdidos_df["_mes"] == mes]
+            mes_sel_perdas = seletor_mes(df, key="gestor_mes_perdas", mes_padrao=mes)
+            if mes_sel_perdas is not None:
+                perdidos_df = perdidos_df[perdidos_df["_mes"] == mes_sel_perdas]
 
             if perdidos_df.empty:
                 st.info("Nenhuma perda no período selecionado.")
             else:
                 total_perd = len(perdidos_df)
                 vendas_periodo = df[df["Resultado"] == "Venda fechada"]
-                if periodo == "Mês atual":
-                    vendas_periodo = vendas_periodo[vendas_periodo["_mes"] == mes]
+                if mes_sel_perdas is not None:
+                    vendas_periodo = vendas_periodo[vendas_periodo["_mes"] == mes_sel_perdas]
                 total_vend = len(vendas_periodo)
                 dec_total  = total_vend + total_perd
                 taxa_perd  = 100 * total_perd / dec_total if dec_total > 0 else 0.0
@@ -1336,17 +1360,21 @@ def tela_gestor():
 
     # --- Dados completos ---
     elif aba_atual == "🗂 Dados completos":
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns(3)
         f_vend = c1.multiselect(
             "Vendedor",
             sorted(df["Vendedor"].unique()) if not df.empty else [],
         )
         f_res  = c2.multiselect("Resultado", RESULTADOS)
+        with c3:
+            mes_sel_dados = seletor_mes(df, key="gestor_mes_dados")
         dados  = df.copy()
         if f_vend:
             dados = dados[dados["Vendedor"].isin(f_vend)]
         if f_res:
             dados = dados[dados["Resultado"].isin(f_res)]
+        if mes_sel_dados is not None:
+            dados = dados[dados["_mes"] == mes_sel_dados]
         _ocultar = {"Contato do Cliente", "Cliente Recorrente?"}
         colunas_exibir = [c for c in CABECALHO_REGISTROS if c in dados.columns and c not in _ocultar]
         st.dataframe(dados[colunas_exibir], hide_index=True, use_container_width=True)
