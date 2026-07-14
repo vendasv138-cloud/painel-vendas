@@ -922,6 +922,16 @@ def tela_vendedor(nome):
             c3.metric("Kg vendido",      br(kpis_vend["kg"]))
             c4.metric("R$ vendido",      "R$ " + br(kpis_vend["rs"]))
 
+            n_contato  = int((df_mes_vend["Resultado"] == "Só contato").sum())
+            n_orc      = int((df_mes_vend["Resultado"] == "Orçamento enviado").sum())
+            n_perdidos = int((df_mes_vend["Situação"] == SITUACAO_PERDIDO).sum())
+            c1x, c2x, c3x = st.columns(3)
+            c1x.metric("Só contato",           n_contato)
+            c2x.metric("Orçamentos enviados",  n_orc)
+            c3x.metric("Perdidos",             n_perdidos)
+            st.caption(f"{n_contato} só contato + {n_orc} orçamentos + {kpis_vend['n_vendas']} vendas "
+                       f"= {len(df_mes_vend)} lançamentos")
+
             c1b, c2b, c3b = st.columns(3)
             c1b.metric("Ticket médio",    "R$ " + br(kpis_vend["ticket"]))
             c2b.metric("Taxa conversão",  f"{kpis_vend['conv']:.0f}%")
@@ -1034,6 +1044,16 @@ def tela_gestor():
         c6.metric("R$ vendido",      "R$ " + br(kpis["rs"]))
         c7.metric("Ticket médio",    "R$ " + br(kpis["ticket"]))
 
+        n_contato_dia  = int((df_hoje["Resultado"] == "Só contato").sum())
+        n_orc_dia      = int((df_hoje["Resultado"] == "Orçamento enviado").sum())
+        n_perdidos_dia = int((df_hoje["Situação"] == SITUACAO_PERDIDO).sum())
+        c1x, c2x, c3x = st.columns(3)
+        c1x.metric("Só contato",          n_contato_dia)
+        c2x.metric("Orçamentos enviados", n_orc_dia)
+        c3x.metric("Perdidos",            n_perdidos_dia)
+        st.caption(f"{n_contato_dia} só contato + {n_orc_dia} orçamentos + {kpis['n_vendas']} vendas "
+                   f"= {len(df_hoje)} lançamentos")
+
         c1b, c2b, c3b, c4b = st.columns(4)
         c1b.metric("Taxa conversão",        f"{kpis['conv']:.0f}%")
         c2b.metric("Taxa de perda",         f"{kpis['perda_pct']:.0f}%")
@@ -1083,6 +1103,16 @@ def tela_gestor():
         c5.metric("Kg vendido",      br(kpis["kg"]))
         c6.metric("R$ vendido",      "R$ " + br(kpis["rs"]))
         c7.metric("Ticket médio",    "R$ " + br(kpis["ticket"]))
+
+        n_contato_mes  = int((df_mes_view["Resultado"] == "Só contato").sum())
+        n_orc_mes      = int((df_mes_view["Resultado"] == "Orçamento enviado").sum())
+        n_perdidos_mes = int((df_mes_view["Situação"] == SITUACAO_PERDIDO).sum())
+        c1x, c2x, c3x = st.columns(3)
+        c1x.metric("Só contato",          n_contato_mes)
+        c2x.metric("Orçamentos enviados", n_orc_mes)
+        c3x.metric("Perdidos",            n_perdidos_mes)
+        st.caption(f"{n_contato_mes} só contato + {n_orc_mes} orçamentos + {kpis['n_vendas']} vendas "
+                   f"= {len(df_mes_view)} lançamentos")
 
         c1b, c2b, c3b = st.columns(3)
         c1b.metric("Taxa conversão", f"{kpis['conv']:.0f}%")
