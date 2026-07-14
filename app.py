@@ -1030,7 +1030,7 @@ def tela_gestor():
                                errors="coerce")
     n_vencidos = int((dias_num > 5).sum())
 
-    OPCOES_GESTOR = ["📅 Hoje", "📈 Mês", "💰 Orçamentos", "🚛 Cargas",
+    OPCOES_GESTOR = ["📅 Hoje", "📈 Mês", "🗓️ Dia a dia", "💰 Orçamentos", "🚛 Cargas",
                       "🔻 Funil", "📊 Análise de Perdas", "🗂 Dados completos"]
     if "gestor_aba" not in st.session_state:
         st.session_state["gestor_aba"] = OPCOES_GESTOR[0]
@@ -1139,6 +1139,37 @@ def tela_gestor():
                 por_dia = vendas_mes.groupby("Data")["Kg"].sum()
                 por_dia.index = pd.to_datetime(por_dia.index, format="%d/%m/%Y")
                 st.bar_chart(por_dia.sort_index())
+
+    # --- Dia a dia ---
+    elif aba_atual == "🗓️ Dia a dia":
+        mes_sel_dia = seletor_mes(df, key="gestor_mes_diaadia", mes_padrao=mes, incluir_todos=False)
+        if mes_sel_dia is None:
+            st.info("Nenhum lançamento registrado ainda.")
+        else:
+            primeiro_dia = pd.Timestamp(datetime.strptime(mes_sel_dia, "%m/%Y"))
+            ultimo_dia   = primeiro_dia + pd.offsets.MonthEnd(0)
+            hoje_dt      = pd.Timestamp(agora().date())
+            dia_final    = min(ultimo_dia, hoje_dt) if mes_sel_dia == mes else ultimo_dia
+            dias         = pd.date_range(primeiro_dia, dia_final)
+
+            vendedores_todos = set(carregar_vendedores())
+            dias_semana       = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+            dias_sem_ninguem  = []
+
+            for dia in reversed(dias):
+                dia_str = dia.strftime("%d/%m/%Y")
+                df_dia  = df[df["Data"] == dia_str]
+                sem_dia = sorted(vendedores_todos - set(df_dia["Vendedor"]))
+                rotulo  = f"{dia_str} ({dias_semana[dia.weekday()]})"
+                if df_dia.empty:
+                    dias_sem_ninguem.append(rotulo)
+                    continue
+                aviso = f" — ⚠️ sem lançar: {', '.join(sem_dia)}" if sem_dia else " — ✅ todos lançaram"
+                with st.expander(f"{rotulo} — {len(df_dia)} lançamento(s){aviso}"):
+                    tabela_ranking(resumir(df_dia))
+
+            if dias_sem_ninguem:
+                st.error("📭 Dias sem NENHUM lançamento: " + ", ".join(dias_sem_ninguem))
 
     # --- Orçamentos ---
     elif aba_atual == "💰 Orçamentos":
