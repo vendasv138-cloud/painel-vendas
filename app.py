@@ -715,7 +715,7 @@ def tela_vendedor(nome):
         st.balloons()
 
     OPCOES_VEND = ["➕ Nova venda", "📄 Orçamentos em aberto",
-                   "📋 Meus lançamentos de hoje", "🚛 Cargas"]
+                   "📋 Meus lançamentos de hoje", "📈 Mês", "🚛 Cargas"]
     if "vend_aba" not in st.session_state:
         st.session_state["vend_aba"] = OPCOES_VEND[0]
     aba_atual = st.radio("Navegação", OPCOES_VEND, horizontal=True,
@@ -890,6 +890,37 @@ def tela_vendedor(nome):
                               on_click=_cb_abrir_editar, args=(chave_edit,))
                     c3.button("🗑️ Apagar", key=f"del_{reg['_linha']}",
                               on_click=_cb_abrir_apagar, args=(chave_conf,))
+
+    # --- Mês (só os próprios números, sem comparação com outros vendedores) ---
+    elif aba_atual == "📈 Mês":
+        minha_df = df[df["Vendedor"] == nome]
+        meses_disponiveis = sorted(minha_df["_mes"].dropna().unique(), reverse=True)
+        if not meses_disponiveis:
+            st.info("Nenhum lançamento registrado ainda.")
+        else:
+            mes_sel = st.selectbox("Mês", meses_disponiveis,
+                                   index=meses_disponiveis.index(mes) if mes in meses_disponiveis else 0,
+                                   key="vend_mes_sel")
+            df_mes_vend = minha_df[minha_df["_mes"] == mes_sel]
+            kpis_vend = _kpis(df_mes_vend)
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Lançamentos",     len(df_mes_vend))
+            c2.metric("Vendas fechadas", kpis_vend["n_vendas"])
+            c3.metric("Kg vendido",      br(kpis_vend["kg"]))
+            c4.metric("R$ vendido",      "R$ " + br(kpis_vend["rs"]))
+
+            c1b, c2b, c3b = st.columns(3)
+            c1b.metric("Ticket médio",    "R$ " + br(kpis_vend["ticket"]))
+            c2b.metric("Taxa conversão",  f"{kpis_vend['conv']:.0f}%")
+            c3b.metric("Taxa de perda",   f"{kpis_vend['perda_pct']:.0f}%")
+
+            vendas_mes_vend = df_mes_vend[df_mes_vend["Resultado"] == "Venda fechada"]
+            if not vendas_mes_vend.empty:
+                st.subheader("Kg vendido por dia")
+                por_dia = vendas_mes_vend.groupby("Data")["Kg"].sum()
+                por_dia.index = pd.to_datetime(por_dia.index, format="%d/%m/%Y")
+                st.bar_chart(por_dia.sort_index())
 
     # --- Cargas do vendedor ---
     elif aba_atual == "🚛 Cargas":
