@@ -712,11 +712,15 @@ def _cb_abrir_editar(chave):
     st.session_state[chave] = True
 
 
-def _cb_salvar_edicao(linha, chave, kg_key, val_key):
+def _cb_salvar_edicao(linha, chave, kg_key, val_key, resultado):
     kg    = st.session_state.get(kg_key, 0.0)
     valor = st.session_state.get(val_key, 0.0)
+    if resultado != "Só contato" and (kg <= 0 or valor <= 0):
+        st.session_state[f"edit_erro_{linha}"] = "Para orçamento ou venda, informe Kg e Valor total."
+        return
     editar_registro(linha, kg, valor)
     st.session_state.pop(chave, None)
+    st.session_state.pop(f"edit_erro_{linha}", None)
     st.session_state["flash"] = "Lançamento atualizado."
 
 
@@ -862,9 +866,11 @@ def tela_vendedor(nome):
                                       format="%.2f", value=float(reg["Valor (R$)"]), key=val_key)
                     ce3.button("💾 Salvar", key=f"saveditorc_{reg['_linha']}", type="primary",
                                on_click=_cb_salvar_edicao,
-                               args=(reg["_linha"], chave_edit_orc, kg_key, val_key))
+                               args=(reg["_linha"], chave_edit_orc, kg_key, val_key, reg["Resultado"]))
                     ce3.button("Cancelar", key=f"canceleditorc_{reg['_linha']}",
                                on_click=_cb_cancelar_editar, args=(chave_edit_orc,))
+                    if st.session_state.get(f"edit_erro_{reg['_linha']}"):
+                        st.error(st.session_state.pop(f"edit_erro_{reg['_linha']}"))
                 st.divider()
 
     # --- Meus lançamentos de hoje ---
@@ -902,9 +908,11 @@ def tela_vendedor(nome):
                                       format="%.2f", value=float(reg["Valor (R$)"]), key=val_key)
                     ce3.button("💾 Salvar", key=f"savedit_{reg['_linha']}", type="primary",
                                on_click=_cb_salvar_edicao,
-                               args=(reg["_linha"], chave_edit, kg_key, val_key))
+                               args=(reg["_linha"], chave_edit, kg_key, val_key, reg["Resultado"]))
                     ce3.button("Cancelar", key=f"canceledit_{reg['_linha']}",
                                on_click=_cb_cancelar_editar, args=(chave_edit,))
+                    if st.session_state.get(f"edit_erro_{reg['_linha']}"):
+                        st.error(st.session_state.pop(f"edit_erro_{reg['_linha']}"))
                 else:
                     c2.button("✏️ Editar", key=f"ed_{reg['_linha']}",
                               on_click=_cb_abrir_editar, args=(chave_edit,))
