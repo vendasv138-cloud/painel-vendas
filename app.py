@@ -390,8 +390,9 @@ def deletar_registro(linha_planilha):
     carregar_registros.clear()
 
 
-def editar_registro(linha_planilha, kg, valor):
+def editar_registro(linha_planilha, cliente, kg, valor):
     preco_kg = round(valor / kg, 2) if kg and valor else 0
+    _atualizar_celula(linha_planilha, "Cliente", cliente.strip())
     _atualizar_celula(linha_planilha, "Kg", round(float(kg), 2))
     _atualizar_celula(linha_planilha, "Valor (R$)", round(float(valor), 2))
     _atualizar_celula(linha_planilha, "R$/kg", preco_kg)
@@ -712,13 +713,17 @@ def _cb_abrir_editar(chave):
     st.session_state[chave] = True
 
 
-def _cb_salvar_edicao(linha, chave, kg_key, val_key, resultado):
-    kg    = st.session_state.get(kg_key, 0.0)
-    valor = st.session_state.get(val_key, 0.0)
+def _cb_salvar_edicao(linha, chave, cliente_key, kg_key, val_key, resultado):
+    cliente = st.session_state.get(cliente_key, "")
+    kg      = st.session_state.get(kg_key, 0.0)
+    valor   = st.session_state.get(val_key, 0.0)
+    if not cliente.strip():
+        st.session_state[f"edit_erro_{linha}"] = "Informe o nome do cliente."
+        return
     if resultado != "Só contato" and (kg <= 0 or valor <= 0):
         st.session_state[f"edit_erro_{linha}"] = "Para orçamento ou venda, informe Kg e Valor total."
         return
-    editar_registro(linha, kg, valor)
+    editar_registro(linha, cliente, kg, valor)
     st.session_state.pop(chave, None)
     st.session_state.pop(f"edit_erro_{linha}", None)
     st.session_state["flash"] = "Lançamento atualizado."
@@ -857,8 +862,10 @@ def tela_vendedor(nome):
 
                 # Editar Kg/Valor do orçamento antes que o cliente responda
                 if st.session_state.get(chave_edit_orc):
-                    kg_key  = f"kgeditorc_{reg['_linha']}"
-                    val_key = f"valeditorc_{reg['_linha']}"
+                    cliente_key = f"clieditorc_{reg['_linha']}"
+                    kg_key      = f"kgeditorc_{reg['_linha']}"
+                    val_key     = f"valeditorc_{reg['_linha']}"
+                    st.text_input("Cliente", value=reg["Cliente"], key=cliente_key)
                     ce1, ce2, ce3 = st.columns([2, 2, 1])
                     ce1.number_input("Kg", min_value=0.0, step=10.0, format="%.2f",
                                       value=float(reg["Kg"]), key=kg_key)
@@ -866,7 +873,7 @@ def tela_vendedor(nome):
                                       format="%.2f", value=float(reg["Valor (R$)"]), key=val_key)
                     ce3.button("💾 Salvar", key=f"saveditorc_{reg['_linha']}", type="primary",
                                on_click=_cb_salvar_edicao,
-                               args=(reg["_linha"], chave_edit_orc, kg_key, val_key, reg["Resultado"]))
+                               args=(reg["_linha"], chave_edit_orc, cliente_key, kg_key, val_key, reg["Resultado"]))
                     ce3.button("Cancelar", key=f"canceleditorc_{reg['_linha']}",
                                on_click=_cb_cancelar_editar, args=(chave_edit_orc,))
                     if st.session_state.get(f"edit_erro_{reg['_linha']}"):
@@ -899,8 +906,10 @@ def tela_vendedor(nome):
                     cc3.button("Cancelar", key=f"nao_{reg['_linha']}",
                                on_click=_cb_cancelar_apagar, args=(chave_conf,))
                 elif st.session_state.get(chave_edit):
-                    kg_key  = f"kgedit_{reg['_linha']}"
-                    val_key = f"valedit_{reg['_linha']}"
+                    cliente_key = f"cliedit_{reg['_linha']}"
+                    kg_key      = f"kgedit_{reg['_linha']}"
+                    val_key     = f"valedit_{reg['_linha']}"
+                    st.text_input("Cliente", value=reg["Cliente"], key=cliente_key)
                     ce1, ce2, ce3 = st.columns([2, 2, 1])
                     ce1.number_input("Kg", min_value=0.0, step=10.0, format="%.2f",
                                       value=float(reg["Kg"]), key=kg_key)
@@ -908,7 +917,7 @@ def tela_vendedor(nome):
                                       format="%.2f", value=float(reg["Valor (R$)"]), key=val_key)
                     ce3.button("💾 Salvar", key=f"savedit_{reg['_linha']}", type="primary",
                                on_click=_cb_salvar_edicao,
-                               args=(reg["_linha"], chave_edit, kg_key, val_key, reg["Resultado"]))
+                               args=(reg["_linha"], chave_edit, cliente_key, kg_key, val_key, reg["Resultado"]))
                     ce3.button("Cancelar", key=f"canceledit_{reg['_linha']}",
                                on_click=_cb_cancelar_editar, args=(chave_edit,))
                     if st.session_state.get(f"edit_erro_{reg['_linha']}"):
