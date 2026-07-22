@@ -272,7 +272,7 @@ def carregar_registros():
     for col in ("Kg", "Valor (R$)", "R$/kg"):
         if col not in df.columns:
             df[col] = 0.0
-        if df[col].dtype == object:
+        if not pd.api.types.is_numeric_dtype(df[col]):
             df[col] = (
                 df[col].astype(str)
                 .str.replace(".", "", regex=False)
