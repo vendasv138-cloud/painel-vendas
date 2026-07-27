@@ -778,8 +778,7 @@ def tela_vendedor(nome):
             index=["Carteira", "Novo", "Prospecção"].index(_sugerido),
             horizontal=True, key=f"tipo_{fv}",
         )
-        with st.expander("Com quem falou / detalhes"):
-            contato = st.text_input("Com quem falou", key=f"cont_{fv}")
+        contato = st.text_input("Com quem falou / detalhes", key=f"cont_{fv}")
         resultado        = st.radio("Resultado do contato *", RESULTADOS,
                                     horizontal=True, key=f"res_{fv}")
 
